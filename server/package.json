@@ -1,0 +1,21 @@
+{
+  "name": "hades2-ranked-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lobby relay, vote resolution and race arbitration for the Hades II ranked race mod",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test --test-reporter=spec dist/test/",
+    "mock": "node dist/src/mock-client.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

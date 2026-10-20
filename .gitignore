@@ -1,0 +1,6 @@
+.DS_Store
+scripts/.env.deck
+# private per-machine state (install paths, logs, script dumps) — coop-anything convention
+local/
+server/node_modules/
+server/dist/
