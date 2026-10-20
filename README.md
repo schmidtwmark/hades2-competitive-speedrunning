@@ -10,14 +10,17 @@ dies, the other has to finish to win (both dying is a draw).
 1. Install [Hell2Modding](https://thunderstore.io/c/hades-ii/p/Hell2Modding/Hell2Modding/) and
    [ModUtil](https://thunderstore.io/c/hades-ii/p/SGG_Modding/ModUtil/) (r2modman or Gale does this),
    then copy `mod/src/` into `ReturnOfModding/plugins/schmidtwmark-RankedRace/`.
-3. On the title screen pick **Play Competitive Speedrun** (identical maxed profile, never touches your
-   saves), or press **F8** in your own game. The lobby window connects to the public server by default.
-   One player clicks **Create Lobby** and shares the 4-letter code; the other joins with it.
-4. Vote, press **Ready**, and the run starts for both of you after a 3-second countdown.
+2. On the title screen pick **Play Competitive Speedrun**, or press **F8** in your own game. The lobby
+   window connects to the public server by default. One player clicks **Create Lobby** and shares the
+   4-letter code; the other joins with it.
+3. Vote on weapon and keepsake. In competitive mode, set your Arcana, familiar and aspect in the
+   Training Grounds, then press **Ready**; the run starts for both of you after a 3-second countdown.
 
-The race forces the voted weapon (base aspect) and keepsake (rank 3) for both
-players and restores your own loadout afterwards. Other save progress (Arcana,
-Fear, unlocks) is not normalized yet.
+Competitive mode gives both players the same fully maxed profile (every weapon, aspect, keepsake,
+familiar and Arcana card at max rank, Grasp 30, Fear 0) built in memory; it never reads or writes
+your saves. Each depth has the same room and enemies for both players whatever doors and boons they
+pick; choices only change rewards. Racing from your own save (F8) forces the voted weapon at its base
+aspect and keepsake at rank 3, and restores your loadout afterwards.
 
 ## Server
 
