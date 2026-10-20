@@ -31,7 +31,7 @@ function Bot.new(deps)
 	end
 	b.cfg = cfg
 	b.active = true
-	-- role "idle": only the eval channel, for poking at the live game by hand.
+	-- role "idle": load the mod in test mode without connecting or racing.
 	b.step = cfg.role == 'idle' and 'idle' or 'connect'
 	b.started = b.now()
 	b.step_started = b.started
@@ -98,41 +98,9 @@ local function read_file(path)
 	return s
 end
 
--- Test-only REPL into the live game: <data>/eval.lua is run once inside a game
--- coroutine (so it may wait()), with G = the game's globals; whatever it
--- returns or raises goes to <data>/eval.out. Only exists while bot.json does.
-function Bot:poll_eval(now)
-	if now < (self.next_eval or 0) then return end
-	self.next_eval = now + 0.5
-	local path = self.dir .. '/eval.lua'
-	local code = read_file(path)
-	if not code then return end
-	os.remove(path)
-	local game, json, dir = self.game, self.json, self.dir
-	local env = setmetatable({ G = game.G, game = game, bot = self, log = self.log, json = json }, { __index = _G })
-	local function out(text)
-		local f = io.open(dir .. '/eval.out', 'a')
-		if f then f:write(text, '\n--END--\n'); f:close() end
-	end
-	local chunk, err = load(code, 'eval', 't', env)
-	if not chunk then return out('compile error: ' .. tostring(err)) end
-	game:spawn(function()
-		local res = { xpcall(chunk, debug.traceback) }
-		if not res[1] then return out('error: ' .. tostring(res[2])) end
-		local parts = {}
-		for i = 2, #res do
-			local v = res[i]
-			local ok, enc = pcall(json.encode, v)
-			parts[#parts + 1] = ok and enc or tostring(v)
-		end
-		out(table.concat(parts, '\t'))
-	end)
-end
-
 function Bot:update()
 	if not self.active then return end
 	local now = self.now()
-	self:poll_eval(now)
 	if self.step == 'done' then
 		if self.cfg.quit_after and now - self.done_at >= self.cfg.quit_after then self.game:quit() end
 		return
@@ -167,6 +135,12 @@ function Bot:reset_to_hub(now)
 end
 
 function Bot:step_wait_game(now, c)
+	if self.game:ready_for_race() and self.cfg.expect_competitive and not self.profile_checked then
+		self.profile_checked = true
+		for _, chk in ipairs(self.game:verify_competitive_profile()) do
+			self:check('profile: ' .. chk.name, chk.ok, chk.detail)
+		end
+	end
 	if self.game:ready_for_race() then
 		if self.cfg.role == 'host' then
 			c:create_lobby()

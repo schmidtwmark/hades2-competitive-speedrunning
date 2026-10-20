@@ -42,6 +42,7 @@ gate sim-two-clients PASS "$ROOT/scripts/test-sim.sh"
 if [ $GAME -eq 1 ]; then
   gate game-vs-mock-win PASS "$ROOT/scripts/e2e-vs-mock.sh" game_wins 2
   gate game-vs-mock-die PASS "$ROOT/scripts/e2e-vs-mock.sh" game_dies 2
+  gate game-competitive-title-to-race PASS env COMPETITIVE=1 "$ROOT/scripts/e2e-vs-mock.sh" game_wins 2
   gate game-two-clients PASS "$ROOT/scripts/e2e-two-games.sh" 3
   gate game-two-clients-same-rooms PASS bash -c "grep -q 'DETERMINISM: SAME' \"\$(ls -td '$ROOT'/local/runs/*-two | head -1)/compare.txt\" && echo 'RESULT: PASS' || echo 'RESULT: FAIL'"
   gate twin-no-seed-must-differ FAIL env MUTATE=no_seed bash -c "'$ROOT/scripts/e2e-two-games.sh' 3 >/dev/null 2>&1; grep -q 'DETERMINISM: SAME' \"\$(ls -td '$ROOT'/local/runs/*-two | head -1)/compare.txt\" && echo 'RESULT: PASS' || echo 'RESULT: FAIL'"

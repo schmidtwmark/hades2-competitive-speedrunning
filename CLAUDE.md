@@ -15,7 +15,6 @@ A competitive 1v1 speedrun mod for Hades 2 — two players race the same seed/we
 - Server: `cd server && npm run build` then `npm start` (`PORT`, `HOST`, `VOTE_SECONDS`, ... env vars). Tests: `npm test`.
 - Everything: `scripts/suite.sh` (offline gates) or `scripts/suite.sh --game` (adds real-game gates on the test PC). Every gate prints `RESULT: PASS|FAIL`.
 - Mod: no build. `scripts/bazzite/push.sh` copies `mod/src/` and pinned dependencies into the test PC's instance roots.
-- Live game REPL (test instances only): `scripts/bazzite/eval.sh A 'return G.CurrentRun.CurrentRoom.Name'`.
 
 ## Test machine
 - The Linux PC `bazzite` (`ssh bazzite.local`, Steam Game Mode, Proton 11). The Mac has no Hades II and H2M doesn't run on macOS.

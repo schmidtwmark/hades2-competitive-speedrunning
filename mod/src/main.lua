@@ -26,6 +26,8 @@ local Net = import('net.lua')
 local UI = import('ui.lua')
 local Game = import('game.lua')
 local Bot = import('bot.lua')
+local Competitive = import('competitive.lua')
+local Profile = import('profile.lua')
 
 -- logging: H2M's log plus our own file, flushed per line -----------------------
 
@@ -65,7 +67,7 @@ save_config()
 
 -- wiring ------------------------------------------------------------------------
 
-local game = Game.new({ rom = rom, modutil = rom.mods['SGG_Modding-ModUtil'], log = log, now = socket.gettime })
+local game = Game.new({ rom = rom, modutil = rom.mods['SGG_Modding-ModUtil'], log = log, now = socket.gettime, profile = Profile })
 
 local client = Client.new({
 	json = json, transport = Net.new(socket, log), now = socket.gettime, log = log,
@@ -96,6 +98,18 @@ local bot = Bot.new({ dir = data_dir, json = json, client = client, game = game,
 if bot.active and bot.cfg.show_ui then ui.visible = true end
 
 game:install_hooks()
+if bot.active and bot.cfg.trace_functions then game:install_tracers(bot.cfg.trace_functions) end
+if bot.active and bot.cfg.probe_doors then game.probe_doors = true end
+
+-- Title screen entry "Play Competitive Speedrun" (native hook; see competitive.lua).
+-- Never let it take the rest of the mod down.
+local competitive = Competitive.new({ rom = rom, log = log, on_start = function() game:enter_competitive() end })
+local menu_ok, menu_err = pcall(competitive.install, competitive)
+if not menu_ok then log('competitive: install failed: ' .. tostring(menu_err)) end
+if menu_ok and bot.active and bot.cfg.press_competitive_after then
+	local ok, err = pcall(competitive.install_test_press, competitive, bot.cfg.press_competitive_after, socket.gettime)
+	if not ok then log('competitive: test press install failed: ' .. tostring(err)) end
+end
 if config.autoconnect or (bot.active and bot.step ~= 'idle') then client:connect() end
 
 -- per frame -----------------------------------------------------------------------

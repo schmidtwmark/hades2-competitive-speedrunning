@@ -23,7 +23,7 @@ data() { echo "$TB/rom-$1/ReturnOfModding/plugins_data/$GUID"; }
 PIDS=()
 cleanup() {
   ssh "$HOST" "$TB/instance.sh stop A; $TB/instance.sh stop B" >/dev/null 2>&1
-  for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done
+  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
 }
 trap cleanup EXIT
 fail() { echo "RESULT: FAIL $*"; exit 1; }
@@ -45,7 +45,7 @@ for X in A B; do
  "timeout":$((TIMEOUT - 60)),"quit_after":5,"show_ui":true,"mutations":{$MUT_JSON},$EXTRA}
 JSON
   D="$(data $X)"
-  ssh "$HOST" "mkdir -p '$D' && rm -f '$D'/bot-result.txt '$D'/trace.json '$D'/ranked.log '$D'/eval.* && cat > '$D/bot.json'" <"$RUN/bot-$X.json" || fail "bot.json $X"
+  ssh "$HOST" "mkdir -p '$D' && rm -f '$D'/bot-result.txt '$D'/trace.json '$D'/ranked.log && cat > '$D/bot.json'" <"$RUN/bot-$X.json" || fail "bot.json $X"
 done
 ssh "$HOST" "rm -f '$TB/run/code'; $TB/instance.sh stop A >/dev/null; $TB/instance.sh stop B >/dev/null; $TB/instance.sh start A $GAME_ARGS && sleep 8 && $TB/instance.sh start B $GAME_ARGS" || fail "launch"
 

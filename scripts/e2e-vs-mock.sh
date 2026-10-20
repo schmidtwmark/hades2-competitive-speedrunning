@@ -12,18 +12,25 @@ ROOMS="${2:-2}"
 TIMEOUT="${E2E_TIMEOUT:-600}"
 GUID="schmidtwmark-RankedRace"
 PORT=$((20000 + RANDOM % 20000))
-RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-$SCEN"
+RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-$SCEN$([ "${COMPETITIVE:-0}" = 1 ] && echo -competitive)"
 mkdir -p "$RUN"
 RHOME="$(ssh "$HOST" 'echo $HOME')"
 TB="$RHOME/h2r-testbed"
 DATA="$TB/rom-A/ReturnOfModding/plugins_data/$GUID"
 WIN() { echo "Z:$1"; }
 GAME_ARGS=(/Windowed=true /Fullscreen=false /X=1280 /Y=720 /DirectLoadShell=false /RequireFocusToUpdate=false)
+# COMPETITIVE=1: boot to the title screen, take "Play Competitive Speedrun", verify the
+# maxed profile, and prove no save file in the test prefix changed.
+COMPETITIVE="${COMPETITIVE:-0}"
+SAVES="$TB/pfx-A/pfx/drive_c/users/steamuser/Saved Games/Hades II"
+if [ "$COMPETITIVE" = 1 ]; then
+  GAME_ARGS=(/Windowed=true /Fullscreen=false /X=1280 /Y=720 /RequireFocusToUpdate=false)
+fi
 
 PIDS=()
 cleanup() {
   ssh "$HOST" "$TB/instance.sh stop A" >/dev/null 2>&1
-  for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done
+  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
 }
 trap cleanup EXIT
 fail() { echo "RESULT: FAIL $*"; exit 1; }
@@ -46,12 +53,15 @@ PIDS+=($!)
 for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
 
 "$ROOT/scripts/bazzite/push.sh" >/dev/null || fail "push"
-python3 - "$BOT" "$PORT" "$ROOMS" "$(WIN "$TB/run/code")" "$MAC_IP" >"$RUN/bot.json" <<'EOF'
+COMPETITIVE=$COMPETITIVE python3 - "$BOT" "$PORT" "$ROOMS" "$(WIN "$TB/run/code")" "$MAC_IP" >"$RUN/bot.json" <<'EOF'
 import json, sys
 bot = json.loads(sys.argv[1])
 bot.update(role="join", server_host=sys.argv[5], server_port=int(sys.argv[2]), name="GameBot",
            rooms=int(sys.argv[3]), code_file=sys.argv[4], weapon="WeaponDagger",
            keepsake="LowHealthCritKeepsake", timeout=540, quit_after=5)
+import os
+if os.environ.get("COMPETITIVE") == "1":
+    bot.update(press_competitive_after=3, expect_competitive=True, reset_to_hub=False)
 print(json.dumps(bot))
 EOF
 ssh "$HOST" "mkdir -p '$DATA' '$TB/run' && rm -f '$TB/run/code' '$DATA/bot-result.txt' '$DATA/trace.json' '$DATA/ranked.log' && cat > '$DATA/bot.json'" <"$RUN/bot.json" || fail "write bot.json"
@@ -65,6 +75,8 @@ for _ in $(seq 50); do [ -s "$RUN/code" ] && break; sleep 0.2; done
 ssh "$HOST" "cat > '$TB/run/code'" <"$RUN/code"
 echo "lobby $(cat "$RUN/code") on port $PORT; launching game"
 
+save_hashes() { ssh "$HOST" "cd '$SAVES' && sha256sum Profile* activeProfile 2>/dev/null"; }
+save_hashes >"$RUN/saves-before.txt"
 ssh "$HOST" "$TB/instance.sh stop A >/dev/null; $TB/instance.sh start A ${GAME_ARGS[*]}" || fail "launch"
 start=$(date +%s)
 while :; do
@@ -78,10 +90,17 @@ for f in bot-result.txt trace.json ranked.log; do scp -q "$HOST:$DATA/$f" "$RUN/
 scp -q "$HOST:$TB/rom-A/ReturnOfModding/LogOutput.log" "$RUN/LogOutput.log" 2>/dev/null
 scp -q "$HOST:$TB/run/A.out" "$RUN/A.out" 2>/dev/null
 wait "$MOCK" 2>/dev/null
+ssh "$HOST" "$TB/instance.sh stop A" >/dev/null 2>&1
+save_hashes >"$RUN/saves-after.txt"
+SAVES_OK=1
+if [ "$COMPETITIVE" = 1 ] && ! cmp -s "$RUN/saves-before.txt" "$RUN/saves-after.txt"; then
+  SAVES_OK=0; echo "save files changed during competitive mode:"; diff "$RUN/saves-before.txt" "$RUN/saves-after.txt"
+fi
 echo "--- game bot ($RUN)"
 cat "$RUN/bot-result.txt" 2>/dev/null || echo "(no bot-result.txt)"
 echo "--- mock: $(grep '^RESULT:' "$RUN/mock.log" | cut -c1-240)"
-if grep -q '^RESULT: PASS' "$RUN/bot-result.txt" 2>/dev/null; then
+[ "$COMPETITIVE" = 1 ] && echo "--- save files unchanged: $([ $SAVES_OK = 1 ] && echo yes || echo NO) ($(wc -l <"$RUN/saves-before.txt" | tr -d ' ') files)"
+if grep -q '^RESULT: PASS' "$RUN/bot-result.txt" 2>/dev/null && [ $SAVES_OK = 1 ]; then
   echo "RESULT: PASS ($SCEN)"
 else
   echo "--- ranked.log tail"; tail -25 "$RUN/ranked.log" 2>/dev/null

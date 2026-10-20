@@ -55,13 +55,39 @@ The two save copies differed only by a few test deaths/runs; far-apart saves are
 - An earlier attempt's r2modman profile (June 13, older game build) crashed with an access
   violation inside its d3d12.dll. Not reproduced with H2M 1.0.117 on this build.
 
+## Competitive mode (title screen, maxed profile, no saves) — verified on the tested build
+
+- The main menu is engine C++ (`sgg::MainMenuScreen`); layout comes from `Content/Game/GUI/MainMenuScreen.sjson`,
+  behaviour from per-button `eastl::function` callbacks bound by component name in the constructor. Lua does
+  not run on the title screen (H2M's Lua callbacks ride `ScriptManager::Update`).
+- The hidden `AnnouncementButton`'s only callback target is `MainMenuScreen::OpenPatchNotes` (rva 0x16cda0;
+  sole caller is that lambda thunk at 0x16eb80). The mod relabels the button via `rom.data.on_sjson_read_as_string`
+  (MainMenuScreen.sjson + ShellText.*.sjson) and hooks the function with `rom.memory.dynamic_hook`, found by a
+  unique 32-byte signature (no hook if the signature is missing).
+- From that hook: `LoadMapInternal({Name="Hub_PreRun"})` (Lua `LoadMap` wait()s, no coroutine there), then
+  `MenuScreen::ExitScreen(menu)` (rva 0x140b70, via `dynamic_call`) to close the title screen.
+- With `GameState == nil` the scripts call `StartNewGame(map)`; the mod replaces it with `profile.lua`
+  (fresh `GameStateInit` + everything maxed). Verified in game: 6 weapons, 24 aspects rank 5, 33 keepsakes
+  level 3, 5 familiars with 45/45 upgrades, 25/25 Arcana at max rank, Grasp 30, Fear 0.
+- No save writes: `GameState.IllegalConversationModification` (RequestSave's own guard) plus hooks on
+  `RequestSave`, `ValidateCheckpoint`, `InvalidateCheckpoint` (the last two write `<Profile>.v.sav`'s
+  checkpoint-valid byte). Gate `COMPETITIVE=1 scripts/e2e-vs-mock.sh` hashes all 11 profile files before and
+  after; without the checkpoint hooks it caught `Profile1.v.sav` changing.
+- Arrive in `Hub_PreRun` with `NextHeroStartPoint 40009 / NextHeroEndPoint 40012` (as from the Crossroads door).
+- H2M quirk: while its overlay is open it skips `Player::HandleInput` and flips a jump in
+  `PlayerManager::HandleInput` (pattern `74 7C 38 05`); in that state the hub's `AutoActivate` doors fire by
+  themselves (Hub_Main <-> Hub_PreRun bounce). The mod ignores `DeathAreaSwitchRoom` from AutoActivate doors
+  while the overlay is open.
+- Under gamescope, xdotool input does not reach the game; the test bot presses the menu entry by calling
+  `OpenPatchNotes(this)` from a `MainMenuScreen::Update` hook (test mode only).
+- Tools: `scripts/pdb_symbols.py` (PDB publics -> RVAs), `scripts/disasm.py` (annotated disassembly).
+
 ## Test bed (test PC)
 
 `~/h2r-testbed`: btrfs reflink (copy-on-write) copies of the install and of the Proton prefix
 (one per instance), our pinned `d3d12.dll` only in the copy, per-instance ReturnOfModding roots
 via `--rom_modding_root_folder`. The owner's install, prefix, saves and r2modman profile are
-never written. Scripts: `scripts/bazzite/{triage,testbed-setup,push,instance,eval}.sh`.
-`eval.sh` runs Lua inside a live test instance (only while a `bot.json` exists).
+never written. Scripts: `scripts/bazzite/{triage,testbed-setup,push,instance,capture}.sh`.
 
 ## Hell2Modding facts (verified in source)
 

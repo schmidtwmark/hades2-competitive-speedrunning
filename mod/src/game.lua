@@ -26,7 +26,8 @@ local BASE_ASPECT = {
 local KEEPSAKE_LEVEL = 3
 
 local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', 'StartRoom', 'KillHero', 'RecordRunCleared',
-	'EquipKeepsake', 'DoUnlockRoomExits' }
+	'EquipKeepsake', 'DoUnlockRoomExits', 'StartNewGame', 'RequestSave', 'DeathAreaSwitchRoom', 'ValidateCheckpoint',
+	'InvalidateCheckpoint' }
 
 function Game.new(deps)
 	local g = setmetatable({}, Game)
@@ -35,6 +36,7 @@ function Game.new(deps)
 	g.modutil = deps.modutil
 	g.log = deps.log
 	g.now = deps.now
+	g.profile = deps.profile
 	g.client = nil
 	g.race = nil          -- race whose run is (or was) live: { race, run, rooms = {} }
 	g.launching = nil     -- race being launched (between GO and StartNewRun)
@@ -168,6 +170,27 @@ function Game:install_hooks()
 	end)
 end
 
+-- Test diagnostics: log every call of the named game functions with a short
+-- Lua traceback (bot.json "trace_functions"). Logging only.
+function Game:install_tracers(names)
+	local mu, G, log = self.modutil, self.G, self.log
+	if not (mu and mu.once_loaded and type(names) == 'table') then return end
+	mu.once_loaded.game(function()
+		local api = (mu.mod and mu.mod.Path and mu.mod) or G.ModUtil
+		for _, name in ipairs(names) do
+			if type(G[name]) == 'function' then
+				api.Path.Wrap(name, function(base, ...)
+					local tb = debug.traceback('', 2):gsub('\n%s*', ' <- '):sub(1, 600)
+					log('trace: ' .. name .. tb)
+					return base(...)
+				end)
+			else
+				log('trace: no function ' .. tostring(name))
+			end
+		end
+	end)
+end
+
 function Game:hooks_installed()
 	local reg = self.G.RankedRaceHooks
 	return reg and reg.installed or {}
@@ -272,6 +295,158 @@ function Game:hook_RecordRunCleared(base, ...)
 	return res
 end
 
+-- competitive mode ------------------------------------------------------------------
+
+-- Called from the title-screen hook. Drops whatever profile state is loaded so
+-- the next map load builds a fresh GameState (no real save involved).
+function Game:enter_competitive()
+	local G = self.G
+	G.RankedRaceCompetitive = { requested = true }
+	G.GameState = nil
+	G.CurrentRun = nil
+	self.log('game: entering competitive mode; loading Hub_PreRun without a profile')
+	-- LoadMap is a Lua wrapper that wait()s; on the title screen there is no
+	-- game coroutine (and no threads to kill), so call the engine directly.
+	self:call('LoadMapInternal', { Name = 'Hub_PreRun' })
+end
+
+function Game:competitive_active()
+	local c = self.G.RankedRaceCompetitive
+	return c ~= nil and c.active == true
+end
+
+-- With no profile loaded, OnPreThingCreation calls StartNewGame(mapName). In
+-- competitive mode build the maxed profile instead of a new save game.
+function Game:hook_StartNewGame(base, mapName)
+	local c = self.G.RankedRaceCompetitive
+	if not (c and c.requested) then return base(mapName) end
+	c.requested = false
+	local ok, summary = pcall(self.profile.build, self.G)
+	if not ok then
+		self.log('game: competitive profile build FAILED: ' .. tostring(summary))
+		return
+	end
+	c.active = true
+	-- Arrive as if walking in from the Crossroads door (DeathLoopData PreRunExit:
+	-- HeroStartPoint 40009 -> HeroEndPoint 40012). Without a walk-in the hero
+	-- stands inside the auto-activating exit back to Hub_Main and bounces.
+	if mapName == 'Hub_PreRun' and self.G.CurrentRun then
+		self.G.CurrentRun.NextHeroStartPoint = 40009
+		self.G.CurrentRun.NextHeroEndPoint = 40012
+	end
+	local parts = {}
+	for k, v in pairs(summary) do parts[#parts + 1] = k .. '=' .. tostring(v) end
+	table.sort(parts)
+	self.log('game: competitive profile built for ' .. tostring(mapName) .. ': ' .. table.concat(parts, ' '))
+end
+
+-- Belt and braces on top of IllegalConversationModification: competitive mode never saves.
+function Game:hook_RequestSave(base, args)
+	if self:competitive_active() then
+		if not self.logged_save_skip then
+			self.logged_save_skip = true
+			self.log('game: competitive mode: save request suppressed')
+		end
+		return
+	end
+	return base(args)
+end
+
+-- Asserts the competitive profile through the game's own level functions.
+-- Returns a list of { name, ok, detail }.
+function Game:verify_competitive_profile()
+	local G = self.G
+	local GS = G.GameState or {}
+	local checks = {}
+	local function check(name, ok, detail) checks[#checks + 1] = { name = name, ok = ok and true or false, detail = detail } end
+	check('competitive mode active', self:competitive_active())
+	check('saving disabled', GS.IllegalConversationModification == true)
+	-- Aspects: every aspect of every weapon at rank 5 (Legendary).
+	local min_aspect, aspects = math.huge, 0
+	local order = G.ScreenData and G.ScreenData.WeaponUpgradeScreen and G.ScreenData.WeaponUpgradeScreen.DisplayOrder or {}
+	for weapon, list in pairs(order) do
+		if type(list) == 'table' then
+			check('weapon unlocked ' .. weapon, GS.WeaponsUnlocked and GS.WeaponsUnlocked[weapon])
+			for _, aspect in ipairs(list) do
+				aspects = aspects + 1
+				min_aspect = math.min(min_aspect, G.GetWeaponUpgradeLevel(aspect))
+			end
+		end
+	end
+	check('all aspects at rank 5', aspects == 24 and min_aspect == 5, string.format('%d aspects, min rank %s', aspects, tostring(min_aspect)))
+	-- Keepsakes: level 3 (Epic) for every gift.
+	local min_keepsake, keepsakes = math.huge, 0
+	for _, gift in pairs(G.GiftData or {}) do
+		if type(gift) == 'table' then
+			for _, level in ipairs(gift) do
+				if level.Gift then
+					keepsakes = keepsakes + 1
+					min_keepsake = math.min(min_keepsake, G.GetKeepsakeLevel(level.Gift))
+				end
+			end
+		end
+	end
+	check('all keepsakes at level 3', keepsakes >= 30 and min_keepsake == 3, string.format('%d keepsakes, min level %s', keepsakes, tostring(min_keepsake)))
+	-- Familiars and their upgrades.
+	local familiars = 0
+	for _, f in ipairs(G.FamiliarOrderData or {}) do
+		if GS.FamiliarsUnlocked and GS.FamiliarsUnlocked[f] then familiars = familiars + 1 end
+	end
+	local upgrades, owned = 0, 0
+	for _, u in ipairs((G.ScreenData and G.ScreenData.FamiliarShop and G.ScreenData.FamiliarShop.ItemOrder) or {}) do
+		if type(u) == 'string' then
+			upgrades = upgrades + 1
+			if GS.FamiliarUpgrades and GS.FamiliarUpgrades[u] then owned = owned + 1 end
+		end
+	end
+	check('all familiars unlocked and upgraded', familiars == #(G.FamiliarOrderData or {}) and familiars > 0 and owned == upgrades,
+		string.format('%d familiars, %d/%d upgrades', familiars, owned, upgrades))
+	-- Arcana: every card unlocked at max rank; max Grasp.
+	local cards, maxed = 0, 0
+	for name, data in pairs(G.MetaUpgradeCardData or {}) do
+		local st = GS.MetaUpgradeState and GS.MetaUpgradeState[name]
+		if type(data) == 'table' and not data.DebugOnly and st then
+			cards = cards + 1
+			if st.Unlocked and st.Level == #(data.UpgradeResourceCost or {}) + 1 then maxed = maxed + 1 end
+		end
+	end
+	check('all arcana at max rank', cards > 0 and maxed == cards, string.format('%d/%d cards', maxed, cards))
+	local grasp = G.GetMaxMetaUpgradeCost and G.GetMaxMetaUpgradeCost()
+	check('max grasp', grasp == 30, 'grasp=' .. tostring(grasp))
+	check('no fear', next(GS.ShrineUpgrades or {}) == nil)
+	return checks
+end
+
+-- The engine's checkpoint-valid flag lives in <Profile>.v.sav; StartOver and
+-- many interactions flip it. In competitive mode leave the player's file alone.
+function Game:hook_ValidateCheckpoint(base, ...)
+	if self:competitive_active() then return end
+	return base(...)
+end
+
+function Game:hook_InvalidateCheckpoint(base, ...)
+	if self:competitive_active() then return end
+	return base(...)
+end
+
+-- While Hell2Modding's overlay is open (our lobby window needs it for text
+-- boxes) it bypasses Player::HandleInput and flips a jump in
+-- PlayerManager::HandleInput; in that state the hub's AutoActivate doors fire
+-- on their own if the hero stands in range, bouncing between Hub_Main and
+-- Hub_PreRun. The player can't use anything while the overlay has input, so
+-- ignore those uses.
+function Game:hook_DeathAreaSwitchRoom(base, source, args)
+	local gui = self.rom.gui
+	if source and source.AutoActivate and gui and gui.is_open and gui.is_open() then
+		if not self.logged_door_block then
+			self.logged_door_block = true
+			self.log('game: ignored hub door auto-use while the overlay is open')
+		end
+		return
+	end
+	return base(source, args)
+end
+
 -- race lifecycle (called from client callbacks) ----------------------------------
 
 function Game:prepare_race(race)
@@ -310,7 +485,8 @@ function Game:start_race(race)
 	self:backup_loadout(race.weapon)
 	if race.weapon ~= '' and G.WeaponData and G.WeaponData[race.weapon] then
 		self:call('EquipPlayerWeapon', G.WeaponData[race.weapon], { SkipPresentation = true })
-		if GS.LastWeaponUpgradeName and BASE_ASPECT[race.weapon] then
+		-- In competitive mode the player picked their aspect in the hub; otherwise use the base aspect.
+		if not self:competitive_active() and GS.LastWeaponUpgradeName and BASE_ASPECT[race.weapon] then
 			GS.LastWeaponUpgradeName[race.weapon] = BASE_ASPECT[race.weapon]
 		end
 	end
@@ -370,6 +546,22 @@ function Game:diagnose(now)
 					tostring(G.GetConfigOptionValue and G.GetConfigOptionValue({ Name = 'RequireFocusToUpdate' }))))
 			end
 		end)
+	end
+	-- Test probe: hero distance to auto-activating hub doors for 10 s after arriving.
+	if self.probe_doors and map ~= self.last_map then self.probe_until, self.next_probe = now + 10, now end
+	if self.probe_doors and now < (self.probe_until or 0) and now >= (self.next_probe or 0) then
+		self.next_probe = now + 1
+		local hub = self.G.HubRoomData and self.G.HubRoomData[map or '']
+		local hero = self.G.CurrentRun and self.G.CurrentRun.Hero
+		local parts = {}
+		for id, obstacle in pairs((hub and hub.ObstacleData) or {}) do
+			if type(obstacle) == 'table' and obstacle.AutoActivate and hero and hero.ObjectId then
+				local ok, d = pcall(self.G.GetDistance, { Id = hero.ObjectId, DestinationId = id })
+				parts[#parts + 1] = string.format('%s=%s(r%s)', tostring(id), ok and tostring(math.floor(d or -1)) or 'err',
+					tostring(obstacle.InteractDistance))
+			end
+		end
+		self.log('probe: ' .. tostring(map) .. ' door distances ' .. table.concat(parts, ' '))
 	end
 	local GS = self.G.GameState
 	if map ~= self.last_map or now - (self.last_beat or 0) >= 15 then
@@ -466,8 +658,8 @@ function Game:bot_advance_room()
 					a.killing = false
 				end)
 			end
-			local enc_done = not encounter or encounter.Completed
-			if enc_done then self:bot_collect_rewards(a) end
+			-- Rewards can gate the fight (opening room: boon first) or follow it.
+			self:bot_collect_rewards(a)
 			self:bot_choose_upgrade()
 		end
 		if now >= a.next_report then
