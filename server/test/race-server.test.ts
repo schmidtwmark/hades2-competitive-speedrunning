@@ -219,6 +219,33 @@ describe("race", () => {
     assert.equal(p.depth, 2);
   });
 
+  it("relays builds with progress and ghosts only while racing", () => {
+    const { a, b } = racing();
+    b.clear();
+    a.send({ ...progress, build: [{ name: "ZeusWeaponBoon", rarity: "Rare" }] });
+    assert.deepEqual(b.last("opponent_progress").build, [{ name: "ZeusWeaponBoon", rarity: "Rare", source: undefined, level: undefined }]);
+    a.send({ ...progress, build: {} });
+    assert.deepEqual(b.last("opponent_progress").build, []);
+    a.send({ type: "ghost", room: "F_Combat01", depth: 2, x: 100.5, y: -20, angle: 90, anim: "run", t: 12.25 });
+    const g = b.last("opponent_ghost");
+    assert.equal(g.x, 100.5);
+    assert.equal(g.room, "F_Combat01");
+    assert.equal(a.all("opponent_ghost").length, 0);
+    a.send({ type: "ghost", room: "R", depth: 1, x: "nope", y: 0, t: 0 });
+    assert.equal(a.last("error").code, "bad_field");
+  });
+
+  it("drops ghosts outside a race and after finishing", () => {
+    const { a, b } = pair();
+    a.send({ type: "ghost", room: "R", depth: 1, x: 0, y: 0, t: 0 });
+    assert.equal(b.all("opponent_ghost").length, 0);
+    const r = racing();
+    r.a.send({ type: "run_complete", victory: false, time: 5 });
+    r.b.clear();
+    r.a.send({ type: "ghost", room: "R", depth: 1, x: 0, y: 0, t: 0 });
+    assert.equal(r.b.all("opponent_ghost").length, 0);
+  });
+
   it("ignores progress before the race starts", () => {
     const { a, b } = pair();
     a.send(progress);
@@ -386,5 +413,88 @@ describe("disconnects", () => {
     const a2 = new TestClient(server, "Alice");
     a2.hello(token);
     assert.equal(a2.last("vote_phase").phase, "weapon");
+  });
+});
+
+describe("find match", () => {
+  it("first player waits, second is paired into a fresh lobby and voting starts", () => {
+    const { server } = makeServer();
+    const a = new TestClient(server, "A");
+    const b = new TestClient(server, "B");
+    a.hello();
+    b.hello();
+    a.send({ type: "find_match" });
+    assert.equal(a.last("queued").waiting, 1);
+    b.send({ type: "find_match" });
+    assert.equal(a.last("lobby_joined").opponent, "B");
+    assert.equal(b.last("lobby_joined").opponent, "A");
+    assert.equal(a.last("vote_phase").phase, "weapon");
+    assert.equal(a.state().code, b.state().code);
+    assert.equal(server.lobbyCount, 1);
+  });
+
+  it("cancel and disconnect leave the queue", () => {
+    const { server } = makeServer();
+    const a = new TestClient(server, "A");
+    const b = new TestClient(server, "B");
+    const c = new TestClient(server, "C");
+    for (const x of [a, b, c]) x.hello();
+    a.send({ type: "find_match" });
+    a.send({ type: "cancel_match" });
+    assert.ok(a.last("match_cancelled"));
+    b.send({ type: "find_match" });
+    b.conn.close();
+    c.send({ type: "find_match" });
+    assert.equal(c.last("queued").waiting, 1);
+    assert.equal(c.all("lobby_joined").length, 0);
+  });
+
+  it("refuses while already in a lobby; creating a lobby leaves the queue", () => {
+    const { server, random, a } = pair();
+    a.send({ type: "find_match" });
+    assert.equal(a.last("error").code, "already_in_lobby");
+    const x = new TestClient(server, "X");
+    const y = new TestClient(server, "Y");
+    x.hello();
+    y.hello();
+    x.send({ type: "find_match" });
+    random.queue.push(1, 1, 1, 1); // a second code, not AAAA again
+    x.send({ type: "create_lobby" });
+    y.send({ type: "find_match" });
+    assert.equal(y.last("queued").waiting, 1);
+  });
+});
+
+describe("join by code (create if missing)", () => {
+  it("the first racer to enter an agreed code opens it, the second joins it", () => {
+    const { server } = makeServer();
+    const a = new TestClient(server, "A");
+    const b = new TestClient(server, "B");
+    a.hello();
+    b.hello();
+    a.send({ type: "join_lobby", code: "wxyz", create: true });
+    assert.equal(a.last("lobby_created").code, "WXYZ");
+    b.send({ type: "join_lobby", code: "WXYZ", create: true });
+    assert.equal(b.last("lobby_joined").opponent, "A");
+    assert.equal(a.last("vote_phase").phase, "weapon");
+  });
+
+  it("rejects codes outside the alphabet; plain joins still need an existing lobby", () => {
+    const { server } = makeServer();
+    const a = new TestClient(server, "A");
+    a.hello();
+    a.send({ type: "join_lobby", code: "AB0O", create: true });
+    assert.equal(a.last("error").code, "bad_code");
+    a.send({ type: "join_lobby", code: "ABCD" });
+    assert.equal(a.last("error").code, "lobby_not_found");
+    assert.equal(server.lobbyCount, 0);
+  });
+
+  it("a full lobby under the code is reported, not replaced", () => {
+    const { server, code } = pair();
+    const c = new TestClient(server, "C");
+    c.hello();
+    c.send({ type: "join_lobby", code, create: true });
+    assert.equal(c.last("error").code, "lobby_full");
   });
 });

@@ -13,6 +13,7 @@ local Client = {}
 Client.__index = Client
 
 local PROGRESS_INTERVAL = 2.0
+local GHOST_INTERVAL = 0.08 -- ~12 position updates per second for the opponent's shadow
 local RECONNECT_MIN, RECONNECT_MAX = 1.0, 10.0
 local PING_INTERVAL = 5.0
 
@@ -48,6 +49,8 @@ function Client.new(opts)
 	}
 	c.last_progress_sent = -math.huge
 	c.pending_progress = nil
+	c.last_ghost_sent = -math.huge
+	c.last_build_key = nil
 	return c
 end
 
@@ -134,12 +137,26 @@ end
 
 function Client:create_lobby() return self:send({ type = 'create_lobby' }) end
 
-function Client:join_lobby(code)
+-- create=true: if nobody has opened this code yet, open it and wait there,
+-- so two racers can both type a code they agreed on.
+function Client:join_lobby(code, create)
 	code = tostring(code or ''):upper():gsub('%s', '')
-	return self:send({ type = 'join_lobby', code = code })
+	return self:send({ type = 'join_lobby', code = code, create = create or nil })
 end
 
 function Client:leave_lobby() return self:send({ type = 'leave_lobby' }) end
+
+-- Quick match: the server pairs us with the next player who asks.
+function Client:find_match()
+	local ok = self:send({ type = 'find_match' })
+	if ok then self.state.queue = { since = self.now(), waiting = nil } end
+	return ok
+end
+
+function Client:cancel_match()
+	self.state.queue = nil
+	return self:send({ type = 'cancel_match' })
+end
 
 function Client:vote(phase, choice)
 	local ok = self:send({ type = 'vote_' .. phase, [phase] = choice })
@@ -164,15 +181,40 @@ function Client:report_progress(p, force)
 	if force then self:_flush_progress(self.now()) end
 end
 
+local function build_key(build)
+	local parts = {}
+	for i, e in ipairs(build or {}) do parts[i] = tostring(e.name) .. ':' .. tostring(e.rarity) .. ':' .. tostring(e.level) end
+	return table.concat(parts, ',')
+end
+
 function Client:_flush_progress(now)
 	local p = self.pending_progress
 	if not p then return end
 	self.pending_progress = nil
 	self.last_progress_sent = now
-	self:send({
+	local msg = {
 		type = 'progress_update', room = p.room, biome = p.biome, depth = p.depth,
 		hp = p.hp, max_hp = p.max_hp, time = p.time or self:race_time(), alive = p.alive ~= false,
-	})
+	}
+	-- The build only travels when it changed.
+	if p.build then
+		local key = build_key(p.build)
+		if key ~= self.last_build_key then
+			self.last_build_key = key
+			msg.build = p.build
+		end
+	end
+	self:send(msg)
+end
+
+-- Position for the opponent's shadow: rate-limited, unthrottled otherwise.
+function Client:report_ghost(g)
+	if not self:racing() or self.state.race.completed then return false end
+	local now = self.now()
+	if now - self.last_ghost_sent < GHOST_INTERVAL then return false end
+	self.last_ghost_sent = now
+	return self:send({ type = 'ghost', room = g.room, depth = g.depth, x = g.x, y = g.y, angle = g.angle, anim = g.anim,
+		t = self:race_time() })
 end
 
 function Client:report_complete(victory, time)
@@ -243,6 +285,8 @@ function handlers.welcome(c, m)
 		c.state.lobby = nil
 		c.state.vote = nil
 	end
+	-- The server drops queued players when the connection drops: queue again.
+	if c.state.queue and not c.state.lobby then c:send({ type = 'find_match' }) end
 	c:_emit('welcome', m)
 end
 
@@ -255,7 +299,19 @@ function handlers.lobby_created(c, m)
 end
 
 function handlers.lobby_joined(c, m)
+	c.state.queue = nil
 	c:_emit('lobby_joined', m)
+end
+
+function handlers.queued(c, m)
+	c.state.queue = c.state.queue or { since = c.now() }
+	c.state.queue.waiting = m.waiting
+	c:_emit('queued', m)
+end
+
+function handlers.match_cancelled(c)
+	c.state.queue = nil
+	c:_emit('match_cancelled')
 end
 
 function handlers.lobby_left(c)
@@ -302,6 +358,8 @@ end
 function handlers.race_start(c, m)
 	c.state.result = nil
 	c.state.opponent = nil
+	c.state.ghost = nil
+	c.last_build_key = nil
 	c.state.opponent_finished = nil
 	c.state.rematch_requested = nil
 	c.pending_progress = nil
@@ -316,7 +374,15 @@ end
 function handlers.opponent_progress(c, m)
 	m.type = nil
 	m.received = c.now()
+	-- Builds arrive only on change; keep the last one.
+	if m.build == nil and c.state.opponent then m.build = c.state.opponent.build end
 	c.state.opponent = m
+end
+
+function handlers.opponent_ghost(c, m)
+	m.type = nil
+	m.received = c.now()
+	c.state.ghost = m
 end
 
 function handlers.opponent_finished(c, m)

@@ -3,7 +3,7 @@
 # Each gate must print a RESULT line; a gate with no RESULT line counts as FAIL.
 # Mutation twins must FAIL (their RESULT is inverted).
 #   scripts/suite.sh            offline only (~1 min)
-#   scripts/suite.sh --game     + real game on the test PC (~20 min, runs one game gate at a time)
+#   scripts/suite.sh --game     + real game on the test PC (~30 min, runs one game gate at a time)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="$ROOT/local/runs/suite-$(date +%Y%m%d-%H%M%S)"
@@ -48,6 +48,12 @@ if [ $GAME -eq 1 ]; then
   # rooms, seeds, mirroring, encounters, enemy rosters and spawn order must still match.
   gate game-two-clients-diverging PASS env COMPETITIVE=1 DIVERGE=1 "$ROOT/scripts/e2e-two-games.sh" 5
   gate game-two-clients-same-rooms PASS bash -c "grep -q 'DETERMINISM: SAME' \"\$(ls -td '$ROOT'/local/runs/*-two | head -1)/compare.txt\" && echo 'RESULT: PASS' || echo 'RESULT: FAIL'"
+  # Native Race Board: both clients type the same code on its keys, vote and ready
+  # through it; the rival plate and shadow must render (bot overlay checks).
+  gate game-two-clients-board-by-code PASS env COMPETITIVE=1 BOARD=1 CODE=1 OVERLAY=1 "$ROOT/scripts/e2e-two-games.sh" 3
+  # Real controller input: a virtual gamepad drives the board (Find Match, D-pad
+  # vote, Ready) against a mock rival.
+  gate game-controller-race PASS "$ROOT/scripts/e2e-pad.sh" 2
   # Mutation twin: per-depth seeding off, same divergent choices -> rooms must differ.
   # A real comparison must report DIFFERENT (FAIL is what the twin expects); no
   # comparison at all prints no RESULT, which the scorer counts as a failure.

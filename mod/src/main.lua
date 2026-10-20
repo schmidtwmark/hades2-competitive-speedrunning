@@ -28,6 +28,10 @@ local Game = import('game.lua')
 local Bot = import('bot.lua')
 local Competitive = import('competitive.lua')
 local Profile = import('profile.lua')
+local Shadow = import('shadow.lua')
+local Hud = import('hud.lua')
+local Board = import('board.lua')
+local Banner = import('banner.lua')
 
 -- logging: H2M's log plus our own file, flushed per line -----------------------
 
@@ -49,7 +53,7 @@ log('=== Ranked Race ' .. VERSION .. ' loading (' .. guid .. ')')
 local DEFAULT_SERVER_HOST = 'hopper.proxy.rlwy.net' -- Railway TCP proxy (scripts/railway-deploy.sh)
 local DEFAULT_SERVER_PORT = 16303
 local config_path = _PLUGIN.config_mod_folder_path .. '/config.json'
-local config = { server_host = DEFAULT_SERVER_HOST, server_port = DEFAULT_SERVER_PORT, player_name = 'Melinoe',
+local config = { server_host = DEFAULT_SERVER_HOST, server_port = DEFAULT_SERVER_PORT, player_name = nil,
 	hud_x = 20, hud_y = 80, autoconnect = false }
 local overrides = {}
 do
@@ -77,6 +81,11 @@ local function save_config(changes)
 	end
 end
 
+-- Controller-only players never type a name: give each install its own.
+if not config.player_name then
+	save_config({ player_name = 'Melinoe ' .. (100 + math.floor(socket.gettime() * 1000) % 900) })
+end
+
 -- wiring ------------------------------------------------------------------------
 
 local game = Game.new({ rom = rom, modutil = rom.mods['SGG_Modding-ModUtil'], log = log, now = socket.gettime, profile = Profile })
@@ -93,6 +102,18 @@ local client = Client.new({
 })
 game.client = client
 
+-- In-run opponent display: the shadow Melinoë and the native rival plate.
+local shadow = Shadow.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime })
+local hud = Hud.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime })
+game.shadow, game.hud = shadow, hud
+
+-- Before/after a race: the native Race Board (controller-first) and banners.
+local board = Board.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime,
+	names = function(id) return game:display_name(id) end })
+board:install()
+local banner = Banner.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime })
+game.board = board
+
 local ui = UI.new({
 	ImGui = rom.ImGui, ImGuiCond = rom.ImGuiCond, ImGuiWindowFlags = rom.ImGuiWindowFlags,
 	client = client, config = config, log = log,
@@ -108,7 +129,7 @@ local ui = UI.new({
 	end,
 })
 
-local bot = Bot.new({ dir = data_dir, json = json, client = client, game = game, log = log, now = socket.gettime })
+local bot = Bot.new({ dir = data_dir, json = json, client = client, game = game, board = board, log = log, now = socket.gettime })
 
 -- Test runs can ask for the lobby window to be open so its draw code runs in-game.
 if bot.active and bot.cfg.show_ui then ui.visible = true end
@@ -132,19 +153,23 @@ if config.autoconnect or (bot.active and bot.step ~= 'idle') then client:connect
 -- always_draw callbacks run on the game's script thread every frame (unless a
 -- frame is skipped), with the Lua state locked, so touching game state is safe.
 
--- First arrival in the competitive hub: open the lobby window and connect.
-local competitive_ui_opened = false
+-- First arrival in the competitive hub: connect and open the Race Board.
+local competitive_arrived = false
 local function competitive_arrival()
-	if competitive_ui_opened or bot.active or not game:competitive_active() or not game:in_hub() then return end
-	competitive_ui_opened = true
-	log('competitive: in the hub; opening the lobby window')
-	ui.visible = true
-	if not rom.gui.is_open() then rom.gui.toggle() end
+	if competitive_arrived or not game:competitive_active() or not game:in_hub() then return end
+	competitive_arrived = true
+	log('competitive: in the hub; opening the race board')
+	board:open_soon(1.5)
 	if client.state.conn == 'disconnected' and not client.want_connected then client:connect() end
 end
 
 local function frame()
-	if ui.visible and bot.active and bot.cfg.show_ui and not rom.gui.is_open() then rom.gui.toggle() end
+	-- show_ui = "lobby": like a player, keep the lobby window open until the race
+	-- starts, then close the overlay so only the in-run HUD shows.
+	if bot.active and bot.cfg.show_ui then
+		local want_open = ui.visible and not (bot.cfg.show_ui == 'lobby' and client:racing())
+		if want_open ~= rom.gui.is_open() then rom.gui.toggle() end
+	end
 	if rom.ImGui.IsKeyPressed(rom.ImGuiKey.F8, false) then
 		ui:toggle()
 		-- Text boxes only get keyboard focus while the H2M overlay is open.
@@ -153,8 +178,13 @@ local function frame()
 	competitive_arrival()
 	client:update()
 	game:update()
+	shadow:update()
+	hud:update()
+	board:update(game:competitive_active() and game:in_hub())
+	banner:update()
 	bot:update()
-	ui:draw_hud()
+	-- Competitive mode is all native UI; the ImGui HUD is for races from your own save.
+	if not hud:active() and not game:competitive_active() then ui:draw_hud() end
 end
 
 local function guarded(fn)

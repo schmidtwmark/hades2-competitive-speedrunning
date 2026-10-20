@@ -11,6 +11,14 @@ export interface VoteOption {
   name: string;
 }
 
+export interface BuildEntry {
+  name: string;
+  rarity?: string;
+  /** Loot source (e.g. "ZeusUpgrade", "TrialUpgrade" for Chaos). */
+  source?: string;
+  level?: number;
+}
+
 export interface Progress {
   room: string;
   biome?: string;
@@ -19,18 +27,35 @@ export interface Progress {
   max_hp?: number;
   time: number;
   alive: boolean;
+  /** Present only when the build changed since the last update. */
+  build?: BuildEntry[];
+}
+
+/** High-rate position snapshot for the opponent's shadow (never stored). */
+export interface Ghost {
+  room: string;
+  depth: number;
+  x: number;
+  y: number;
+  angle?: number;
+  anim?: string;
+  t: number;
 }
 
 export type ClientMessage =
   | { type: "hello"; name: string; version?: string; token?: string }
   | { type: "create_lobby" }
-  | { type: "join_lobby"; code: string }
+  | { type: "find_match" }
+  | { type: "cancel_match" }
+  /** create: if no lobby has this code yet, open one under it and wait (both racers can type an agreed code). */
+  | { type: "join_lobby"; code: string; create?: boolean }
   | { type: "leave_lobby" }
   | { type: "vote_weapon"; weapon: string }
   | { type: "vote_keepsake"; keepsake: string }
   | { type: "ready" }
   | ({ type: "progress_update" } & Progress)
   | { type: "run_complete"; time: number; victory: boolean }
+  | ({ type: "ghost" } & Ghost)
   | { type: "forfeit" }
   | { type: "rematch" }
   | { type: "ping"; t?: number };
@@ -77,6 +102,8 @@ export interface RaceSetup {
 export type ServerMessage =
   | { type: "welcome"; id: string; token: string; protocol: number; server_time: number; resumed: boolean }
   | { type: "lobby_created"; code: string }
+  | { type: "queued"; waiting: number }
+  | { type: "match_cancelled" }
   | { type: "lobby_joined"; code: string; opponent: string | null }
   | {
       type: "lobby_state";
@@ -92,6 +119,7 @@ export type ServerMessage =
   | { type: "vote_result"; phase: VotePhase; selected: string; votes: { you: string | null; opponent: string | null } }
   | ({ type: "race_start"; countdown: number; countdown_ms: number } & RaceSetup)
   | ({ type: "opponent_progress" } & Progress)
+  | ({ type: "opponent_ghost" } & Ghost)
   | { type: "opponent_finished"; victory: boolean; time: number }
   | { type: "opponent_disconnected"; grace: number }
   | { type: "opponent_reconnected" }
@@ -149,6 +177,19 @@ function optNum(o: Record<string, unknown>, key: string): number | undefined {
   return o[key] === undefined || o[key] === null ? undefined : num(o, key);
 }
 
+function optBuild(o: Record<string, unknown>): BuildEntry[] | undefined {
+  const v = o.build;
+  if (v === undefined || v === null) return undefined;
+  // An empty build arrives as {} from the Lua encoder (empty tables are objects).
+  if (typeof v === "object" && !Array.isArray(v) && Object.keys(v as object).length === 0) return [];
+  if (!Array.isArray(v) || v.length > 64) throw new ProtocolError("bad_field", "field 'build' must be a list (max 64)");
+  return v.map((e) => {
+    if (typeof e !== "object" || e === null) throw new ProtocolError("bad_field", "build entries must be objects");
+    const r = e as Record<string, unknown>;
+    return { name: str(r, "name"), rarity: optStr(r, "rarity"), source: optStr(r, "source"), level: optNum(r, "level") };
+  });
+}
+
 /** Parse and validate one decoded JSON value into a ClientMessage. */
 export function parseClientMessage(raw: unknown): ClientMessage {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -160,13 +201,15 @@ export function parseClientMessage(raw: unknown): ClientMessage {
     case "hello":
       return { type, name: str(o, "name", 32), version: optStr(o, "version"), token: optStr(o, "token", 128) };
     case "create_lobby":
+    case "find_match":
+    case "cancel_match":
     case "leave_lobby":
     case "ready":
     case "forfeit":
     case "rematch":
       return { type };
     case "join_lobby":
-      return { type, code: str(o, "code", 16).toUpperCase() };
+      return { type, code: str(o, "code", 16).toUpperCase(), ...(o.create === true ? { create: true } : {}) };
     case "vote_weapon":
       return { type, weapon: str(o, "weapon") };
     case "vote_keepsake":
@@ -181,6 +224,18 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         max_hp: optNum(o, "max_hp"),
         time: num(o, "time"),
         alive: bool(o, "alive"),
+        build: optBuild(o),
+      };
+    case "ghost":
+      return {
+        type,
+        room: str(o, "room"),
+        depth: num(o, "depth"),
+        x: num(o, "x"),
+        y: num(o, "y"),
+        angle: optNum(o, "angle"),
+        anim: optStr(o, "anim"),
+        t: num(o, "t"),
       };
     case "run_complete":
       return { type, time: num(o, "time"), victory: bool(o, "victory") };

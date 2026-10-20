@@ -3,6 +3,7 @@
 //
 //   node dist/src/mock-client.js --name Bot --create --code-file /tmp/code
 //   node dist/src/mock-client.js --name Bot --join ABCD --outcome win --finish-after 20
+//   node dist/src/mock-client.js --name Bot --queue          (Find Match)
 //
 // Prints one JSON line per received message and a final `RESULT: <json>` line.
 
@@ -16,6 +17,7 @@ export interface MockOptions {
   port: number;
   name: string;
   create: boolean;
+  queue?: boolean;
   join?: string;
   joinFile?: string;
   codeFile?: string;
@@ -67,6 +69,7 @@ export function runMock(o: MockOptions): Promise<MockResult> {
       switch (m.type) {
         case "welcome":
           if (o.create) send({ type: "create_lobby" });
+          else if (o.queue) send({ type: "find_match" });
           else if (o.join) send({ type: "join_lobby", code: o.join });
           else if (o.joinFile) {
             const path = o.joinFile;
@@ -154,6 +157,7 @@ async function main() {
       port: { type: "string", default: "7777" },
       name: { type: "string", default: "MockBot" },
       create: { type: "boolean", default: false },
+      queue: { type: "boolean", default: false },
       join: { type: "string" },
       "join-file": { type: "string" },
       "code-file": { type: "string" },
@@ -173,6 +177,7 @@ async function main() {
     port: Number(values.port),
     name: values.name!,
     create: values.create!,
+    queue: values.queue!,
     join: values.join,
     joinFile: values["join-file"],
     codeFile: values["code-file"],

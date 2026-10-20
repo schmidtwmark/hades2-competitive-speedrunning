@@ -10,7 +10,7 @@ PKG="$ROOT/local/thunderstore/x"
 GUID="schmidtwmark-RankedRace"
 
 ssh "$HOST" "mkdir -p $TB/h2m $TB/rom-A/ReturnOfModding/plugins $TB/rom-B/ReturnOfModding/plugins"
-rsync -a "$ROOT/scripts/bazzite/instance.sh" "$ROOT/scripts/bazzite/testbed-setup.sh" "$HOST:$TB/"
+rsync -a "$ROOT/scripts/bazzite/instance.sh" "$ROOT/scripts/bazzite/testbed-setup.sh" "$ROOT/scripts/bazzite/pad.py" "$HOST:$TB/"
 rsync -a "$PKG/Hell2Modding-Hell2Modding-1.0.117/ReturnOfModdingPack/d3d12.dll" "$HOST:$TB/h2m/d3d12.dll"
 for X in A B; do
   for dir in "$PKG"/*; do

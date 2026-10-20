@@ -60,6 +60,18 @@ describe("tcp transport + mock clients", () => {
     assert.ok(host.opponentProgress > 0, "host saw guest progress");
   });
 
+  it("two bots meet through Find Match over TCP", async () => {
+    const [a, b] = await Promise.all([
+      runMock({ ...base(), name: "QA", queue: true, outcome: "win", finishAfter: 1 }),
+      runMock({ ...base(), name: "QB", queue: true, outcome: "die", finishAfter: 0.5 }),
+    ]);
+    assert.equal(a.error, null);
+    assert.equal(b.error, null);
+    assert.equal(a.code, b.code);
+    assert.deepEqual(a.race, b.race);
+    assert.equal(a.result?.you_won, true);
+  });
+
   it("handles split and coalesced lines and bad JSON", async () => {
     const sock = net.connect(port, "127.0.0.1");
     sock.setEncoding("utf8");

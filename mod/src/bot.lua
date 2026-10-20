@@ -4,7 +4,9 @@
 -- on real game state, and writes `RESULT: PASS|FAIL ...` to bot-result.txt.
 --
 -- bot.json fields:
---   role          "host" | "join"
+--   role          "host" | "join" | "queue" (Find Match; both bots queue)
+--                 | "code" (both type race_code; the first opens it)
+--                 | "pad" (hands off the lobby: a real controller drives the board)
 --   code_file     host writes the lobby code here, joiner polls it
 --   weapon, keepsake  what to vote for (default: first option)
 --   rooms         room transitions to drive before the outcome (default 2)
@@ -12,6 +14,8 @@
 --   timeout       seconds before giving up (default 600)
 --   trace_file    where to write the per-room trace (optional)
 --   quit_after    exit the game this many seconds after the result (optional)
+--   use_board     do lobby actions by pressing Race Board controls (the same
+--                 path a controller press takes) instead of calling the client
 
 local Bot = {}
 Bot.__index = Bot
@@ -19,6 +23,8 @@ Bot.__index = Bot
 function Bot.new(deps)
 	local b = setmetatable({}, Bot)
 	b.client, b.game, b.log, b.now, b.json = deps.client, deps.game, deps.log, deps.now, deps.json
+	b.board = deps.board
+	b.press_queue = {}
 	b.dir = deps.dir
 	b.active = false
 	local f = io.open(b.dir .. '/bot.json', 'r')
@@ -87,13 +93,70 @@ function Bot:finish(pass, why)
 	self.done_at = self.now()
 end
 
+-- cfg.dwell (seconds): pause before each lobby action, like a person reading
+-- the screen. Used for screenshot runs; 0/absent acts immediately.
+function Bot:wait_dwell(key, now)
+	local dwell = self.cfg.dwell
+	if not dwell or dwell <= 0 then return false end
+	self.dwells = self.dwells or {}
+	if not self.dwells[key] then self.dwells[key] = now + dwell end
+	return now < self.dwells[key]
+end
+
 function Bot:on_vote(v)
+	if self.cfg.role == 'pad' then return end -- the controller votes
+	if self.cfg.dwell and not self.cfg.use_board then -- board presses dwell on their own
+		self.pending_vote = v
+		return
+	end
+	self:cast_vote(v)
+end
+
+function Bot:cast_vote(v)
 	local want = self.cfg[v.phase]
 	local choice = v.options[1] and v.options[1].id
 	for _, o in ipairs(v.options) do
 		if o.id == want then choice = o.id end
 	end
-	if choice then self.client:vote(v.phase, choice) end
+	if not choice then return end
+	if self.cfg.use_board then return self:queue_press('opt_' .. choice) end
+	self.client:vote(v.phase, choice)
+end
+
+-- use_board: presses wait (one per frame) until the open board shows the
+-- control, so each lands on the page a player would see it on.
+function Bot:queue_press(...)
+	for _, key in ipairs({ ... }) do self.press_queue[#self.press_queue + 1] = key end
+end
+
+function Bot:pump_presses(now)
+	local key = self.press_queue[1]
+	local b = self.board
+	if not key then return end
+	-- A press whose page never shows (e.g. the vote timed out) must not block the rest.
+	self.press_head = self.press_head or { key = key, since = now }
+	if self.press_head.key ~= key then self.press_head = { key = key, since = now } end
+	if now - self.press_head.since > 10 then
+		self.log('bot: dropped press ' .. key .. ' (never on the board)')
+		table.remove(self.press_queue, 1)
+		return
+	end
+	if not (b and b:is_open() and b.desc) then return end
+	if self:wait_dwell('press_' .. key .. '_' .. #self.press_queue, now) then return end
+	if b:press(key) then
+		table.remove(self.press_queue, 1)
+		self.press_head = nil
+		self.log('bot: pressed ' .. key .. ' on board page ' .. tostring(b.desc.id))
+	end
+end
+
+-- A lobby action: through the board when use_board, else straight to the client.
+function Bot:lobby_action(keys, direct)
+	if self.cfg.use_board then
+		self:queue_press((table.unpack or unpack)(keys))
+	else
+		direct()
+	end
 end
 
 local function read_file(path)
@@ -118,6 +181,7 @@ function Bot:update()
 	if self.step == 'idle' then return end
 	if self.game.bot_advance_dialogue then self.game:bot_advance_dialogue() end
 	if self.step == 'connect' or self.step == 'wait_game' then self:reset_to_hub(now) end
+	self:pump_presses(now)
 	local handler = self['step_' .. self.step]
 	if handler then handler(self, now, c, st) end
 end
@@ -148,9 +212,23 @@ function Bot:step_wait_game(now, c)
 		end
 	end
 	if self.game:ready_for_race() then
-		if self.cfg.role == 'host' then
-			c:create_lobby()
+		if self:wait_dwell('lobby', now) then return end
+		if self.cfg.use_board and not (self.board and self.board:is_open()) then return end
+		if self.cfg.role == 'pad' then
+			self:go_step('pad_lobby')
+		elseif self.cfg.role == 'host' then
+			self:lobby_action({ 'create' }, function() c:create_lobby() end)
 			self:go_step('hosting')
+		elseif self.cfg.role == 'queue' then
+			self:lobby_action({ 'find' }, function() c:find_match() end)
+			self:go_step('queueing')
+		elseif self.cfg.role == 'code' then
+			local code = tostring(self.cfg.race_code or 'RACE')
+			local keys = { 'join_page' }
+			for ch in code:gmatch('.') do keys[#keys + 1] = 'key_' .. ch end
+			keys[#keys + 1] = 'join'
+			self:lobby_action(keys, function() c:join_lobby(code, true) end)
+			self:go_step('queueing')
 		else
 			self:go_step('joining')
 		end
@@ -171,12 +249,46 @@ function Bot:step_hosting(now, c, st)
 	self:step_lobby(now, c, st)
 end
 
+-- role "pad": the test drives the board with a virtual gamepad; wait for the race.
+function Bot:step_pad_lobby(now, c, st)
+	if st.race then
+		local b = self.board
+		self:check('lobby driven by controller input', b and b.stats.presses >= 3,
+			b and string.format('opens=%d builds=%d presses=%d', b.stats.opens, b.stats.builds, b.stats.presses))
+		self:check('race_start', st.race.seed and st.race.seed > 0, 'seed=' .. tostring(st.race.seed))
+		self:go_step('countdown')
+	end
+end
+
+function Bot:step_queueing(now, c, st)
+	if not st.lobby then return end
+	-- The first racer to enter a code opens the lobby and waits there.
+	if not self.matched and c:opponent_name() == nil then return end
+	if not self.matched then
+		self.matched = true
+		self:check(self.cfg.role == 'code' and 'matched by race code' or 'matched by Find Match',
+			c:opponent_name() ~= nil and (self.cfg.role ~= 'code' or st.lobby.code == self.cfg.race_code),
+			'lobby ' .. tostring(st.lobby.code))
+	end
+	self:step_lobby(now, c, st)
+end
+
 function Bot:step_joining(now, c, st)
 	if not st.lobby then
 		if now - (self.last_join or 0) > 1 then
 			self.last_join = now
 			local code = read_file(self.cfg.code_file)
-			if code and code:match('%w') then c:join_lobby(code) end
+			code = code and code:match('%w+')
+			if code and not self:wait_dwell('join', now) and not self.join_queued then
+				if self.cfg.use_board then
+					self.join_queued = true
+					self:queue_press('join_page')
+					for ch in code:gmatch('.') do self:queue_press('key_' .. ch) end
+					self:queue_press('join')
+				else
+					c:join_lobby(code)
+				end
+			end
 		end
 		return
 	end
@@ -185,12 +297,22 @@ end
 
 function Bot:step_lobby(now, c, st)
 	local phase = c:phase()
-	if phase == 'ready_check' and not self.readied then
+	local v = self.pending_vote
+	if v and st.vote and st.vote.phase == v.phase and not self:wait_dwell('vote_' .. v.phase, now) then
+		self.pending_vote = nil
+		self:cast_vote(v)
+	end
+	if phase == 'ready_check' and not self.readied and not self:wait_dwell('ready', now) then
 		self.readied = true
-		c:ready()
+		self:lobby_action({ 'ready' }, function() c:ready() end)
 	end
 	if st.race then
 		self:check('race_start', st.race.seed and st.race.seed > 0, 'seed=' .. tostring(st.race.seed))
+		if self.cfg.use_board then
+			local b = self.board
+			self:check('lobby driven through the Race Board', b and b.stats.opens > 0 and b.stats.presses >= 3 and #self.press_queue == 0,
+				b and string.format('opens=%d builds=%d presses=%d queued=%d', b.stats.opens, b.stats.builds, b.stats.presses, #self.press_queue))
+		end
 		self:go_step('countdown')
 	end
 end
@@ -232,6 +354,14 @@ function Bot:step_play(now, c, st)
 	if not self.trace_written then
 		self.trace_written = true
 		self:check('rooms driven', self.rooms_done >= target, self.rooms_done)
+		if self.cfg.expect_overlay then
+			local hud, shadow = self.game.hud, self.game.shadow
+			self:check('native opponent panel built', hud and not hud.disabled and hud.stats.builds > 0,
+				hud and string.format('builds=%d refreshes=%d', hud.stats.builds, hud.stats.refreshes))
+			self:check('shadow shown and placed', shadow and not shadow.disabled and shadow.stats.frames_visible > 0
+				and shadow.stats.max_error < 5, shadow and string.format('spawns=%d frames=%d max_error=%.1f',
+				shadow.stats.spawns, shadow.stats.frames_visible, shadow.stats.max_error))
+		end
 		self:write_trace()
 		local outcome = self.cfg.outcome or 'none'
 		if outcome == 'die' then

@@ -69,6 +69,19 @@ local function patch_shell_text(text)
 	return text:sub(1, at - 1) .. entry .. text:sub(at)
 end
 
+-- ScreenText.<lang>.sjson: in-world prompts (the Race Board's "{I} Race").
+local SCREEN_TEXTS = { { 'RankedRace_UseBoard', '{I} Race' } }
+local function patch_screen_text(text)
+	if text:find(SCREEN_TEXTS[1][1], 1, true) then return nil end
+	local _, open_end = text:find('Texts%s*=%s*%[')
+	if not open_end then return nil end
+	local entries = {}
+	for _, t in ipairs(SCREEN_TEXTS) do
+		entries[#entries + 1] = '\n    {\n      Id = "' .. t[1] .. '"\n      DisplayName = "' .. t[2] .. '"\n    }'
+	end
+	return text:sub(1, open_end) .. table.concat(entries) .. text:sub(open_end + 1)
+end
+
 function Competitive:install_sjson()
 	local data = self.rom.data
 	if not (data and data.on_sjson_read_as_string) then
@@ -84,6 +97,8 @@ function Competitive:install_sjson()
 			return out
 		elseif p:find('ShellText%.[%w_%-]+%.sjson$') then
 			return patch_shell_text(text)
+		elseif p:find('/ScreenText%.[%w_%-]+%.sjson$') then
+			return patch_screen_text(text)
 		end
 	end)
 	return true
@@ -173,5 +188,6 @@ end
 
 Competitive.patch_main_menu = patch_main_menu
 Competitive.patch_shell_text = patch_shell_text
+Competitive.patch_screen_text = patch_screen_text
 
 return Competitive

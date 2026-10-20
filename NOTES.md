@@ -16,8 +16,8 @@ were re-checked against this build's own `Content/Scripts` (copied to `local/gam
 
 | Piece | State | Evidence |
 |---|---|---|
-| Server: lobby, votes, ready, countdown, win/loss/draw, reconnect | built | `cd server && npm test`: 35 pass |
-| Mod: JSON, protocol client, UI | built | `cd mod && lua test/run.lua`: 19 pass (Lua 5.2.4 and 5.5) |
+| Server: lobby, votes, ready, countdown, win/loss/draw, reconnect, Find Match, race by code | built | `cd server && npm test`: 44 pass |
+| Mod: JSON, protocol client, UI, Race Board pages, rival plate | built | `cd mod && lua test/run.lua`: 39 pass (Lua 5.2.4) |
 | Mod: LuaSocket client vs real server | built | `scripts/test-protocol.sh`: PASS |
 | Mod in a simulated game (2 clients) | built | `scripts/test-sim.sh`: PASS; 5 mutations each FAIL |
 | **Real game: mod loads, all hooks found** | verified | LogOutput.log: "game: hooks installed", no missing targets |
@@ -27,7 +27,9 @@ were re-checked against this build's own `Content/Scripts` (copied to `local/gam
 | **Competitive mode: title entry, maxed profile, no saves** | verified | `COMPETITIVE=1 scripts/e2e-vs-mock.sh`: profile checks + 11 save files byte-identical |
 | **Diverging choices -> same rooms/enemies/spawn order** | verified for 7 depths | `COMPETITIVE=1 DIVERGE=1 scripts/e2e-two-games.sh` |
 | Determinism check can fail | checked | `MUTATE=no_seed`: "seed applied" FAILs, rooms diverge from room 3 (rooms 1-2 are forced intro rooms) |
-| Lobby window + HUD draw in game | verified | `show_ui` runs log no UI errors; window captures show the HUD with live opponent data |
+| **Native Race Board drives the whole lobby (two real clients)** | verified | `BOARD=1 CODE=1 OVERLAY=1 COMPETITIVE=1 scripts/e2e-two-games.sh 3`: both typed the same code on the on-screen keys, voted on icon grids, readied; plate + shadow checks ok; captures in local/runs/tour |
+| **Real controller input** | verified | `scripts/e2e-pad.sh`: virtual gamepad presses only (A, D-pad) -> Find Match, weapon vote Right Right A = WeaponTorch (the run started with it), Ready; run won |
+| Rival plate, shadow Melinoë, VICTORY/DEFEAT banners in game | verified | captures (local/runs/tour); bot checks: plate built per map, shadow placed with 0 error |
 | **Full suite** | green | `scripts/suite.sh --game`: 9/9 gates (2026-10-20) |
 
 "Win" in the real-game tests calls the game's own `RecordRunCleared` (what the
@@ -107,6 +109,44 @@ divergence run in which the players never took different doors. Offline twin: `M
 scripts/test-sim.sh` fails.
 
 Consequences: a shop/fountain at a depth is compulsory for both players; Chaos gates are just another door.
+
+## Native UI: Race Board, rival plate, shadow, banners
+
+Everything a player touches is native Hades UI driven by the game's own menu
+machinery, so a controller works everywhere; the ImGui window (F8) is debug only.
+
+- **Race Board** (`mod/src/board.lua`): opens by itself on arrival in the competitive hub
+  and whenever a vote, ready check or result needs the player; the Pitch-Black Stone
+  (Hub_PreRun obstacle 561146) becomes its entrance (`OnUsedFunctionName`, UseText
+  `RankedRace_UseBoard` = "{I} Race", added to ScreenText.*.sjson). Built like the
+  StoryReset prompt / Keepsake rack: `OnScreenOpened`, `CreateScreenFromData` (tint +
+  `MythmakerBoxDefault`), `ButtonDefault` / `ButtonKeepsakeItem` components,
+  `ExclusiveInteractGroup`, `TeleportCursor`, and a copy of `HandleScreenInput` that uses a
+  fresh notify name per page build (a press meant for a rebuilt page is dropped, not
+  replayed). Pages are a pure function of client state (`Board.view`, unit tested).
+  Weapon icons: each weapon's base aspect `TraitData[...].Icon`; keepsakes:
+  `InRackIcon or Icon`. Code entry is an 8x4 on-screen keyboard of the server's code alphabet.
+- **Matchmaking**: Find Match (server queue, oldest first; re-queues after reconnect),
+  Create Private Race (random code), Race by Code (`join_lobby` with `create`: an unused
+  code opens a lobby under it, so both racers can type an agreed code).
+- **Rival plate** (`mod/src/hud.lua`, top right, Combat_UI group): HUD fonts/colours, the
+  player's `HPBarFill` art (its fraction is the *missing* part), boon icons with
+  `Frame_Boon_Menu_<Rarity>`; fades with the game's HUD while `MapState.CombatUIHide` is set.
+- **Shadow Melinoë** (`mod/src/shadow.lua`): `BlankObstacle3D` + GrannyModel `Melinoe_Mesh`,
+  tinted/alpha'd, teleported toward the rival's 12 Hz ghost reports while in the same room.
+- **Banners** (`mod/src/banner.lua`): 3-2-1-GO from the server start time; result via
+  `DisplayInfoBanner` (the biome-cleared banner).
+- **Map loads destroy objects and the engine reuses their ids.** Every object id the mod
+  keeps lives in `MapState` (replaced by `MapStateInit` on each load); an id kept elsewhere
+  ended up pointing at Zeus's dialogue box and our text appeared there.
+- **Real controller test**: `scripts/e2e-pad.sh` creates a virtual gamepad on the test PC
+  (`scripts/bazzite/pad.py`, uinput + python-evdev) and drives the board with A / D-pad
+  presses only, against a mock rival from Find Match. Two findings: (1) with an Xbox
+  VID/PID, Steam Input claims the pad and Proton opens only Steam's virtual copy, which
+  stays silent for a game Steam didn't launch, so the pad uses a generic VID/PID;
+  (2) the game starts selection from the mouse pointer when it switches to controller
+  mode, so the board re-places the cursor on its focus when `UseMouse` turns false, and
+  it only auto-opens once `IsInputAllowed` (the hub arrival blocks input for seconds).
 
 ## Public server (Railway)
 

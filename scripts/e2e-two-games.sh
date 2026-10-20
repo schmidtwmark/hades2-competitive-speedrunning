@@ -16,11 +16,15 @@ RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-two"
 mkdir -p "$RUN"
 RHOME="$(ssh "$HOST" 'echo $HOME')"
 TB="$RHOME/h2r-testbed"
-GAME_ARGS="/Windowed=true /Fullscreen=false /X=960 /Y=540 /DirectLoadShell=false /RequireFocusToUpdate=false"
+RES="${RES:-/X=960 /Y=540}"
+GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /RequireFocusToUpdate=false"
 # COMPETITIVE=1: both clients enter via the title-screen entry (identical maxed profiles).
 # DIVERGE=1: instance B takes the highest-id door and the last boon (A: lowest, first).
+# QUEUE=1: both clients use Find Match instead of a private lobby code.
+# BOARD=1: lobby actions go through the native Race Board (code typed on its keys).
+# CODE=1: both clients enter the same random race code (no host).
 if [ "${COMPETITIVE:-0}" = 1 ]; then
-  GAME_ARGS="/Windowed=true /Fullscreen=false /X=960 /Y=540 /RequireFocusToUpdate=false"
+  GAME_ARGS="/Windowed=true /Fullscreen=false $RES /RequireFocusToUpdate=false"
 fi
 MAC_IP="${MAC_IP:-$(ipconfig getifaddr en0 || ipconfig getifaddr en1)}"
 data() { echo "$TB/rom-$1/ReturnOfModding/plugins_data/$GUID"; }
@@ -33,14 +37,20 @@ cleanup() {
 trap cleanup EXIT
 fail() { echo "RESULT: FAIL $*"; exit 1; }
 
-(cd "$ROOT/server" && npm run --silent build) || fail "server build"
-PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=4 COUNTDOWN_MS=3000 node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
-PIDS+=($!)
-for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
+# REMOTE_SERVER=host:port races through a deployed server (e.g. Railway) instead of this Mac.
+if [ -n "${REMOTE_SERVER:-}" ]; then
+  MAC_IP="${REMOTE_SERVER%:*}"; PORT="${REMOTE_SERVER##*:}"
+else
+  (cd "$ROOT/server" && npm run --silent build) || fail "server build"
+  PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=4 COUNTDOWN_MS=3000 node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
+  PIDS+=($!)
+  for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
+fi
 "$ROOT/scripts/bazzite/push.sh" >/dev/null || fail "push"
 
 COMP_JSON=""
 [ "${COMPETITIVE:-0}" = 1 ] && COMP_JSON='"press_competitive_after":3,"expect_competitive":true,"reset_to_hub":false,'
+RACE_CODE=$(LC_ALL=C tr -dc 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' </dev/urandom | head -c 4)
 MUT_JSON=""
 [ -n "${MUTATE:-}" ] && MUT_JSON="\"$MUTATE\":true"
 for X in A B; do
@@ -48,10 +58,12 @@ for X in A B; do
   [ "${DIVERGE:-0}" = 1 ] && [ "$X" = B ] && PICK='"door_pick":"highest","boon_pick":"last",'
   if [ "$X" = A ]; then ROLE=host; EXTRA='"outcome":"win","win_after_opponent_death":true,"expect":"win","expect_reason":"survivor_finished"'
   else ROLE=join; EXTRA='"outcome":"die","expect":"lose","expect_reason":"survivor_finished"'; fi
+  [ "${QUEUE:-0}" = 1 ] && ROLE=queue
+  [ "${CODE:-0}" = 1 ] && ROLE=code
   cat >"$RUN/bot-$X.json" <<JSON
 {"role":"$ROLE","name":"Bot$X","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
  "code_file":"Z:$TB/run/code","weapon":"WeaponAxe","keepsake":"BossPreDamageKeepsake",
- "timeout":$((TIMEOUT - 60)),"quit_after":5,"show_ui":true,"mutations":{$MUT_JSON},$COMP_JSON$PICK
+ "timeout":$((TIMEOUT - 60)),"quit_after":5,"show_ui":${SHOW_UI:-true},"dwell":${DWELL:-0},"expect_overlay":$([ "${OVERLAY:-0}" = 1 ] && echo true || echo false),"use_board":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"race_code":"$RACE_CODE","mutations":{$MUT_JSON},$COMP_JSON$PICK
  $EXTRA}
 JSON
   D="$(data $X)"

@@ -42,3 +42,13 @@ T.case('patchers refuse unexpected layouts', function()
 	T.eq(Competitive.patch_main_menu('{ Foo = {} }'), nil)
 	T.eq(Competitive.patch_shell_text('{ Texts = [] }'), nil)
 end)
+
+T.case('screen text: adds the race board prompt once', function()
+	local text = '{\n  Texts =\n  [\n    {\n      Id = "Menu_Exit"\n      DisplayName = "{CN} EXIT"\n    }\n  ]\n}'
+	local out = assert(Competitive.patch_screen_text(text))
+	T.truthy(out:find('Id = "RankedRace_UseBoard"', 1, true))
+	T.truthy(out:find('DisplayName = "{I} Race"', 1, true))
+	T.truthy(out:find('Id = "Menu_Exit"', 1, true))
+	T.eq(Competitive.patch_screen_text(out), nil)
+	T.eq(Competitive.patch_screen_text('{ Foo = 1 }'), nil)
+end)

@@ -8,6 +8,7 @@ import {
   ProtocolError,
   parseClientMessage,
   type ClientMessage,
+  type Ghost,
   type LobbyPhase,
   type Progress,
   type RaceResultEntry,
@@ -54,6 +55,7 @@ export interface ServerOptions {
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const isLobbyCode = (code: string) => code.length === 4 && [...code].every((ch) => CODE_ALPHABET.includes(ch));
 const MAX_SEED = 2 ** 31 - 1;
 
 interface RaceState extends RaceSetup {
@@ -127,6 +129,8 @@ export class RaceServer {
   private sessions = new Map<string, Session>();
   private byToken = new Map<string, Session>();
   private lobbies = new Map<string, Lobby>();
+  /** Players waiting for "Find Match", oldest first. */
+  private queue: Session[] = [];
   private nextId = 1;
 
   constructor(private readonly opts: ServerOptions) {}
@@ -166,8 +170,12 @@ export class RaceServer {
         return s.send({ type: "pong", t: msg.t ?? null, server_time: this.opts.scheduler.now() });
       case "create_lobby":
         return this.onCreate(s);
+      case "find_match":
+        return this.onFindMatch(s);
+      case "cancel_match":
+        return this.onCancelMatch(s, true);
       case "join_lobby":
-        return this.onJoin(s, msg.code);
+        return this.onJoin(s, msg.code, msg.create === true);
       case "leave_lobby":
         return this.onLeave(s);
       case "vote_weapon":
@@ -182,6 +190,10 @@ export class RaceServer {
       }
       case "run_complete":
         return this.onRunComplete(s, msg.victory, msg.time);
+      case "ghost": {
+        const { type: _t, ...ghost } = msg;
+        return this.onGhost(s, ghost);
+      }
       case "forfeit":
         return this.onForfeit(s, "forfeit");
       case "rematch":
@@ -249,6 +261,7 @@ export class RaceServer {
     const s = conn.session;
     if (s.conn !== conn) return;
     s.conn = null;
+    this.onCancelMatch(s, false);
     const lobby = s.lobby;
     if (!lobby) {
       this.forget(s);
@@ -282,9 +295,10 @@ export class RaceServer {
     }
   }
 
-  private onCreate(s: Session): void {
+  private onCreate(s: Session, code = this.newCode()): void {
+    this.onCancelMatch(s, false);
     if (s.lobby) this.removeFromLobby(s, "forfeit");
-    const lobby = new Lobby(this.newCode(), this.opts.scheduler.now());
+    const lobby = new Lobby(code, this.opts.scheduler.now());
     lobby.players.push(s);
     s.lobby = lobby;
     this.lobbies.set(lobby.code, lobby);
@@ -293,11 +307,47 @@ export class RaceServer {
     this.broadcastState(lobby);
   }
 
-  private onJoin(s: Session, code: string): void {
+  // Quick match: pair with whoever has waited longest, else wait in the queue.
+  private onFindMatch(s: Session): void {
+    if (s.lobby) return this.error(s, "already_in_lobby", "Leave your lobby first");
+    if (this.queue.includes(s)) return;
+    const partner = this.queue.find((p) => p !== s && p.connected);
+    if (!partner) {
+      this.queue.push(s);
+      this.log(`queue ${s.id} waiting (${this.queue.length})`);
+      s.send({ type: "queued", waiting: this.queue.length });
+      return;
+    }
+    this.queue = this.queue.filter((p) => p !== partner);
+    const lobby = new Lobby(this.newCode(), this.opts.scheduler.now());
+    this.lobbies.set(lobby.code, lobby);
+    for (const p of [partner, s]) {
+      lobby.players.push(p);
+      p.lobby = lobby;
+    }
+    this.log(`queue matched ${partner.id} + ${s.id} in ${lobby.code}`);
+    for (const p of lobby.players) {
+      p.send({ type: "lobby_joined", code: lobby.code, opponent: lobby.opponentOf(p)?.name ?? null });
+    }
+    this.startVoting(lobby);
+  }
+
+  private onCancelMatch(s: Session, reply: boolean): void {
+    const was = this.queue.includes(s);
+    this.queue = this.queue.filter((p) => p !== s);
+    if (reply && was) s.send({ type: "match_cancelled" });
+  }
+
+  private onJoin(s: Session, code: string, create: boolean): void {
     const lobby = this.lobbies.get(code);
+    if (!lobby && create) {
+      if (!isLobbyCode(code)) return this.error(s, "bad_code", `${code} is not a valid race code`);
+      return this.onCreate(s, code);
+    }
     if (!lobby) return this.error(s, "lobby_not_found", `Lobby ${code} not found`);
     if (lobby === s.lobby) return this.error(s, "already_in_lobby", "Already in this lobby");
     if (lobby.players.length >= 2) return this.error(s, "lobby_full", `Lobby ${code} is full`);
+    this.onCancelMatch(s, false);
     if (s.lobby) this.removeFromLobby(s, "forfeit");
     lobby.players.push(s);
     s.lobby = lobby;
@@ -520,6 +570,13 @@ export class RaceServer {
     if (lobby.race.results.has(s.id)) return;
     lobby.race.progress.set(s.id, progress);
     lobby.opponentOf(s)?.send({ type: "opponent_progress", ...progress });
+  }
+
+  /** Relay only: positions are useless a moment later, so nothing is stored. */
+  private onGhost(s: Session, ghost: Ghost): void {
+    const lobby = s.lobby;
+    if (!lobby || lobby.phase !== "racing" || !lobby.race || lobby.race.results.has(s.id)) return;
+    lobby.opponentOf(s)?.send({ type: "opponent_ghost", ...ghost });
   }
 
   private onRunComplete(s: Session, victory: boolean, time: number): void {

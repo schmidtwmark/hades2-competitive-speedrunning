@@ -214,14 +214,31 @@ local function unpack_results(results)
 	return (table.unpack or unpack)(results, 2, #results)
 end
 
+-- Non-linear mixing mod 2^31-1 (squaring + Park-Miller multiply). mulmod
+-- splits the multiplier into 16-bit halves so every product stays below 2^53
+-- and is exact in Lua 5.2's doubles. Without mixing, consecutive depths got
+-- seeds in arithmetic progression.
+local MIX_MOD = 2147483647
+local function mulmod(a, b)
+	local hi, lo = math.floor(b / 65536), b % 65536
+	return ((a * hi % MIX_MOD) * 65536 + a * lo) % MIX_MOD
+end
+local function mix(h)
+	for round = 1, 3 do
+		h = (mulmod(h, h) + 0x2545F491 + round) % MIX_MOD
+		h = mulmod(h, 48271)
+	end
+	return h
+end
+
 local function hash_seed(...)
 	local h = 7
 	for i = 1, select('#', ...) do
 		local part = tostring((select(i, ...)))
-		for j = 1, #part do h = (h * 31 + part:byte(j)) % SEED_MOD end
-		h = (h * 31 + 59) % SEED_MOD
+		for j = 1, #part do h = (h * 31 + part:byte(j)) % MIX_MOD end
+		h = mix(h + 1)
 	end
-	return h + 1
+	return mix(h + 1) % SEED_MOD + 1
 end
 Game.hash_seed = hash_seed
 
@@ -729,6 +746,24 @@ end
 
 -- progress -------------------------------------------------------------------------
 
+-- The opponent-visible build: traits that came from loot (god boons, Chaos,
+-- hammers), not the keepsake/aspect/Arcana everyone in competitive shares.
+function Game:build_list()
+	local G = self.G
+	local hero = G.CurrentRun and G.CurrentRun.Hero
+	local source_of = self:fn('GetLootSourceName')
+	local list = {}
+	if not (hero and source_of) then return list end
+	for _, trait in ipairs(hero.Traits or {}) do
+		local ok, source = pcall(source_of, trait.Name, { ForBoonInfo = true })
+		if ok and source then
+			list[#list + 1] = { name = trait.Name, rarity = trait.Rarity, source = source, level = trait.StackNum }
+		end
+	end
+	table.sort(list, function(a, b) return a.name < b.name end)
+	return list
+end
+
 function Game:progress(alive)
 	local run = self.G.CurrentRun
 	local room = run and run.CurrentRoom
@@ -740,6 +775,7 @@ function Game:progress(alive)
 		hp = hero and hero.Health or 0,
 		max_hp = hero and hero.MaxHealth or nil,
 		alive = alive ~= false and not (hero and hero.IsDead),
+		build = self:build_list(),
 	}
 end
 
@@ -887,8 +923,14 @@ function Game:bot_advance_room()
 		local doors = G.MapState and G.MapState.OfferedExitDoors
 		local highest = self.bot_cfg and self.bot_cfg.door_pick == 'highest'
 		local best
+		-- Chaos gates are optional side rooms (their own room, a Chaos trial the
+		-- bot can't take): only use one when it is the sole exit.
+		local regular = 0
+		for _, door in pairs(doors or {}) do
+			if type(door) == 'table' and door.Room and not tostring(door.Room.Name):match('^Chaos') then regular = regular + 1 end
+		end
 		for id, door in pairs(doors or {}) do
-			if type(door) == 'table' and door.Room then
+			if type(door) == 'table' and door.Room and (regular == 0 or not tostring(door.Room.Name):match('^Chaos')) then
 				local oid = door.ObjectId or id
 				local better = not best or (highest and oid > best.ObjectId) or (not highest and oid < best.ObjectId)
 				if better then best = door; best.ObjectId = oid end
@@ -919,10 +961,14 @@ function Game:bot_collect_rewards(a)
 	if G.AreScreensActive and G.AreScreensActive() then return end
 	a.used = a.used or {}
 	local now = self.now()
+	local enc = a.room and a.room.Encounter
 	for id, required in pairs((G.MapState and G.MapState.RoomRequiredObjects) or {}) do
 		-- The live object (what OnUsed would receive) may be a different table;
 		-- consumables default to UseConsumableItem (CreateConsumableItemFromData).
 		local obj = (G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id]) or required
+		-- Field NPCs (Artemis...) fight alongside you and give their boon after
+		-- the encounter; talking to them first leaves the room stuck.
+		if type(obj) == 'table' and tostring(obj.Name):match('^NPC_') and enc and not enc.Completed then obj = nil end
 		if type(obj) == 'table' and not obj.OnUsedFunctionName and G.ConsumableData and G.ConsumableData[obj.Name] then
 			obj.OnUsedFunctionName = 'UseConsumableItem'
 		end
@@ -987,11 +1033,13 @@ function Game:exit_blockers(room)
 	local req = {}
 	for id, obj in pairs((G.MapState and G.MapState.RoomRequiredObjects) or {}) do req[#req + 1] = tostring(obj.Name or id) end
 	parts[#parts + 1] = 'required_objects=' .. table.concat(req, ',')
-	local screens = {}
+	local screens, open = {}, {}
 	for name, screen in pairs(G.ActiveScreens or {}) do
+		open[#open + 1] = tostring(name)
 		if screen.BlockExitsReady then screens[#screens + 1] = tostring(name) end
 	end
 	parts[#parts + 1] = 'blocking_screens=' .. table.concat(screens, ',')
+	parts[#parts + 1] = 'open_screens=' .. table.concat(open, ',')
 	parts[#parts + 1] = 'unlocked=' .. tostring(room and room.ExitsUnlocked)
 	return table.concat(parts, ' ')
 end
