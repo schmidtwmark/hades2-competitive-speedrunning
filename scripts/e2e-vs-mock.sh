@@ -46,11 +46,20 @@ case "$SCEN" in
 esac
 
 (cd "$ROOT/server" && npm run --silent build) || fail "server build"
-# The game connects straight to this Mac over the LAN (a real network hop).
-MAC_IP="${MAC_IP:-$(ipconfig getifaddr en0 || ipconfig getifaddr en1)}"
-PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=3 COUNTDOWN_MS=3000 node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
-PIDS+=($!)
-for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
+# By default the game connects straight to a server on this Mac over the LAN.
+# REMOTE_SERVER=host:port uses a deployed server instead (e.g. Railway).
+if [ -n "${REMOTE_SERVER:-}" ]; then
+  MAC_IP="${REMOTE_SERVER%:*}"
+  PORT="${REMOTE_SERVER##*:}"
+  MOCK_HOST="$MAC_IP"
+  echo "using remote server $MAC_IP:$PORT" >"$RUN/server.log"
+else
+  MAC_IP="${MAC_IP:-$(ipconfig getifaddr en0 || ipconfig getifaddr en1)}"
+  MOCK_HOST=127.0.0.1
+  PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=3 COUNTDOWN_MS=3000 node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
+  PIDS+=($!)
+  for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
+fi
 
 "$ROOT/scripts/bazzite/push.sh" >/dev/null || fail "push"
 COMPETITIVE=$COMPETITIVE python3 - "$BOT" "$PORT" "$ROOMS" "$(WIN "$TB/run/code")" "$MAC_IP" >"$RUN/bot.json" <<'EOF'
@@ -66,7 +75,7 @@ print(json.dumps(bot))
 EOF
 ssh "$HOST" "mkdir -p '$DATA' '$TB/run' && rm -f '$TB/run/code' '$DATA/bot-result.txt' '$DATA/trace.json' '$DATA/ranked.log' && cat > '$DATA/bot.json'" <"$RUN/bot.json" || fail "write bot.json"
 
-node "$ROOT/server/dist/src/mock-client.js" --host 127.0.0.1 --port "$PORT" --name MockBot --create --code-file "$RUN/code" \
+node "$ROOT/server/dist/src/mock-client.js" --host "$MOCK_HOST" --port "$PORT" --name MockBot --create --code-file "$RUN/code" \
   --weapon WeaponDagger --keepsake LowHealthCritKeepsake "${MOCK_ARGS[@]}" --timeout "$TIMEOUT" >"$RUN/mock.log" 2>&1 &
 MOCK=$!
 PIDS+=($MOCK)

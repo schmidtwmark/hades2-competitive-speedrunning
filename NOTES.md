@@ -108,6 +108,15 @@ scripts/test-sim.sh` fails.
 
 Consequences: a shop/fountain at a depth is compulsory for both players; Chaos gates are just another door.
 
+## Public server (Railway)
+
+Project `hades2-ranked-race`, service `race-server`, built from `server/Dockerfile`, listening on `::7777`
+behind a Railway TCP proxy at `hopper.proxy.rlwy.net:16303` (the mod's default). The CLI has no TCP-proxy
+command; `scripts/railway-deploy.sh` creates it through the GraphQL API (needs an explicit User-Agent; the
+default urllib one gets 403). Verified: two mock bots over the internet, and the real game in competitive
+mode (`REMOTE_SERVER=hopper.proxy.rlwy.net:16303 COMPETITIVE=1 scripts/e2e-vs-mock.sh`): PASS, saves untouched.
+The first deploy waited out a Railway-wide build pause (2026-10-20).
+
 ## Deployment (owner's r2modman profile on the test PC)
 
 `scripts/bazzite/deploy-r2modman.sh` installs the mod and the tested Hell2Modding 1.0.117 / ModUtil 4.0.1

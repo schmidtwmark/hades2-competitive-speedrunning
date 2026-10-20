@@ -44,26 +44,38 @@ log('=== Ranked Race ' .. VERSION .. ' loading (' .. guid .. ')')
 
 -- config: a Lua table file in the plugin's config folder ------------------------
 
+-- The file holds only what the player changed, so new defaults (e.g. a moved
+-- public server) still reach everyone who never edited them.
+local DEFAULT_SERVER_HOST = 'hopper.proxy.rlwy.net' -- Railway TCP proxy (scripts/railway-deploy.sh)
+local DEFAULT_SERVER_PORT = 16303
 local config_path = _PLUGIN.config_mod_folder_path .. '/config.json'
-local config = { server_host = '127.0.0.1', server_port = 7777, player_name = 'Melinoe', hud_x = 20, hud_y = 80, autoconnect = false }
+local config = { server_host = DEFAULT_SERVER_HOST, server_port = DEFAULT_SERVER_PORT, player_name = 'Melinoe',
+	hud_x = 20, hud_y = 80, autoconnect = false }
+local overrides = {}
 do
 	local f = io.open(config_path, 'r')
 	if f then
 		local ok, saved = pcall(json.decode, f:read('*a'))
 		f:close()
 		if ok and type(saved) == 'table' then
-			for k, v in pairs(saved) do config[k] = v end
+			for k, v in pairs(saved) do
+				config[k] = v
+				overrides[k] = v
+			end
 		end
 	end
 end
-local function save_config()
+local function save_config(changes)
+	for k, v in pairs(changes) do
+		config[k] = v
+		overrides[k] = v
+	end
 	local f = io.open(config_path, 'w')
 	if f then
-		f:write(json.encode(config))
+		f:write(json.encode(overrides))
 		f:close()
 	end
 end
-save_config()
 
 -- wiring ------------------------------------------------------------------------
 
@@ -87,8 +99,12 @@ local ui = UI.new({
 	names = function(id) return game:display_name(id) end,
 	status = function() return game:status_line() end,
 	on_connect = function(host, port, name)
-		config.server_host, config.server_port, config.player_name = host, port, name
-		save_config()
+		local changes = { player_name = name }
+		-- Only remember a server the player actually typed in.
+		if host ~= DEFAULT_SERVER_HOST or port ~= DEFAULT_SERVER_PORT then
+			changes.server_host, changes.server_port = host, port
+		end
+		save_config(changes)
 	end,
 })
 

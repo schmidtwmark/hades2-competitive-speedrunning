@@ -13,6 +13,7 @@ A competitive 1v1 speedrun mod for Hades 2 — two players race the same seed/we
 
 ## Common commands
 - Server: `cd server && npm run build` then `npm start` (`PORT`, `HOST`, `VOTE_SECONDS`, ... env vars). Tests: `npm test`.
+- Public server: Railway project `hades2-ranked-race` at `hopper.proxy.rlwy.net:16303` (TCP proxy). Redeploy: `scripts/railway-deploy.sh`.
 - Everything: `scripts/suite.sh` (offline gates) or `scripts/suite.sh --game` (adds real-game gates on the test PC). Every gate prints `RESULT: PASS|FAIL`.
 - Mod: no build. `scripts/bazzite/push.sh` copies `mod/src/` and pinned dependencies into the test PC's instance roots.
 
