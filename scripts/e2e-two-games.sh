@@ -17,6 +17,11 @@ mkdir -p "$RUN"
 RHOME="$(ssh "$HOST" 'echo $HOME')"
 TB="$RHOME/h2r-testbed"
 GAME_ARGS="/Windowed=true /Fullscreen=false /X=960 /Y=540 /DirectLoadShell=false /RequireFocusToUpdate=false"
+# COMPETITIVE=1: both clients enter via the title-screen entry (identical maxed profiles).
+# DIVERGE=1: instance B takes the highest-id door and the last boon (A: lowest, first).
+if [ "${COMPETITIVE:-0}" = 1 ]; then
+  GAME_ARGS="/Windowed=true /Fullscreen=false /X=960 /Y=540 /RequireFocusToUpdate=false"
+fi
 MAC_IP="${MAC_IP:-$(ipconfig getifaddr en0 || ipconfig getifaddr en1)}"
 data() { echo "$TB/rom-$1/ReturnOfModding/plugins_data/$GUID"; }
 
@@ -34,15 +39,20 @@ PIDS+=($!)
 for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
 "$ROOT/scripts/bazzite/push.sh" >/dev/null || fail "push"
 
+COMP_JSON=""
+[ "${COMPETITIVE:-0}" = 1 ] && COMP_JSON='"press_competitive_after":3,"expect_competitive":true,"reset_to_hub":false,'
 MUT_JSON=""
 [ -n "${MUTATE:-}" ] && MUT_JSON="\"$MUTATE\":true"
 for X in A B; do
+  PICK=""
+  [ "${DIVERGE:-0}" = 1 ] && [ "$X" = B ] && PICK='"door_pick":"highest","boon_pick":"last",'
   if [ "$X" = A ]; then ROLE=host; EXTRA='"outcome":"win","win_after_opponent_death":true,"expect":"win","expect_reason":"survivor_finished"'
   else ROLE=join; EXTRA='"outcome":"die","expect":"lose","expect_reason":"survivor_finished"'; fi
   cat >"$RUN/bot-$X.json" <<JSON
 {"role":"$ROLE","name":"Bot$X","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
  "code_file":"Z:$TB/run/code","weapon":"WeaponAxe","keepsake":"BossPreDamageKeepsake",
- "timeout":$((TIMEOUT - 60)),"quit_after":5,"show_ui":true,"mutations":{$MUT_JSON},$EXTRA}
+ "timeout":$((TIMEOUT - 60)),"quit_after":5,"show_ui":true,"mutations":{$MUT_JSON},$COMP_JSON$PICK
+ $EXTRA}
 JSON
   D="$(data $X)"
   ssh "$HOST" "mkdir -p '$D' && rm -f '$D'/bot-result.txt '$D'/trace.json '$D'/ranked.log && cat > '$D/bot.json'" <"$RUN/bot-$X.json" || fail "bot.json $X"
@@ -74,5 +84,5 @@ for X in A B; do
   fi
 done
 echo "--- trace comparison"
-python3 "$ROOT/scripts/compare-traces.py" "$RUN/A-trace.json" "$RUN/B-trace.json" | tee "$RUN/compare.txt"
+python3 "$ROOT/scripts/compare-traces.py" "$RUN/A-trace.json" "$RUN/B-trace.json" $([ "${DIVERGE:-0}" = 1 ] && echo --expect-divergence) | tee "$RUN/compare.txt"
 [ $ok -eq 1 ] && echo "RESULT: PASS (two real clients)" || fail "two real clients"

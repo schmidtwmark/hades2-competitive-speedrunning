@@ -14,7 +14,7 @@ local echo = os.getenv('SIM_ECHO') == '1'
 
 local function mkdir(p) os.execute('mkdir -p "' .. p .. '"') end
 
-local function make(name, bot, progress)
+local function make(name, bot, progress, action_noise)
 	local base = work .. '/' .. name
 	mkdir(base .. '/data')
 	mkdir(base .. '/config')
@@ -26,7 +26,7 @@ local function make(name, bot, progress)
 	bot.result_file = base .. '/result.txt'
 	bot.timeout = 60
 	return Sim.new({ name = name, src_dir = 'src', data_dir = base .. '/data', config_dir = base .. '/config', bot = bot,
-		json = json, echo = echo, progress = progress })
+		json = json, echo = echo, progress = progress, action_noise = action_noise })
 end
 
 local failures = {}
@@ -51,10 +51,14 @@ do
 end
 
 -- 2. Joiner dies, then host clears: host wins as the survivor.
-local host = make('Host', { role = 'host', weapon = 'WeaponAxe', keepsake = 'LowHealthCritKeepsake', rooms = 2, outcome = 'win',
-	win_after_opponent_death = true, expect = 'win', expect_reason = 'survivor_finished' }, 0)
-local guest = make('Guest', { role = 'join', weapon = 'WeaponAxe', keepsake = 'LowHealthCritKeepsake', rooms = 2, outcome = 'die', expect = 'lose',
-	expect_reason = 'survivor_finished' }, progress_b)
+local mutate = os.getenv('MUTATE')
+local mutations = mutate and { [mutate] = true } or {}
+-- The guest deliberately diverges: other door, and its in-room actions use a
+-- different amount of RNG (like different crits/procs in the real game).
+local host = make('Host', { role = 'host', weapon = 'WeaponAxe', keepsake = 'LowHealthCritKeepsake', rooms = 4, outcome = 'win',
+	win_after_opponent_death = true, expect = 'win', expect_reason = 'survivor_finished', mutations = mutations }, 0)
+local guest = make('Guest', { role = 'join', weapon = 'WeaponAxe', keepsake = 'LowHealthCritKeepsake', rooms = 4, outcome = 'die', expect = 'lose',
+	expect_reason = 'survivor_finished', door_pick = 'highest', mutations = mutations }, progress_b, 7)
 
 local function read(path)
 	local f = io.open(path, 'r')
@@ -94,11 +98,14 @@ if ta and tb then
 	end
 	print('host rooms:  ' .. table.concat(a.rooms, ' > '))
 	print('guest rooms: ' .. table.concat(b.rooms, ' > '))
-	if progress_b == 0 then
-		check(same, 'identical room sequence for identical saves')
-	else
-		print('(different save progress: room sequences may differ; this run documents it)')
+	check(same, 'identical room sequence despite different doors and in-room RNG use')
+	local da, db = a.details.rooms or {}, b.details.rooms or {}
+	local enc_same = #da == #db and #da > 1
+	for i = 1, math.max(#da, #db) do
+		local x, y = da[i] or {}, db[i] or {}
+		if x.encounter ~= y.encounter or x.enemies ~= y.enemies or x.flipped ~= y.flipped then enc_same = false end
 	end
+	check(enc_same, 'identical encounters, enemies and mirroring per depth')
 end
 
 -- 3. Reload safety: re-running main.lua must not double-wrap.

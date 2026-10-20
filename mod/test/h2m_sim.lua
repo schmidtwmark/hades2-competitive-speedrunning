@@ -62,6 +62,8 @@ local function fake_game(sim, opts)
 		for _ = 1, G.GameState.Progress do rng(100) end
 		G.InitializeRewardStores(run)
 		run.CurrentRoom = G.ChooseStartingRoom(run, args)
+		-- As in the game: CreateRoom (inside StartNewRun) picks the first encounter.
+		run.CurrentRoom.Encounter = G.ChooseEncounter(run, run.CurrentRoom)
 		return run
 	end
 	function G.InitializeRewardStores(run) run.RewardStores = { first = rng(1000) } end
@@ -72,20 +74,34 @@ local function fake_game(sim, opts)
 		G.wait(0.1)
 		G.LoadMap({ Name = run.CurrentRoom.Name, Room = run.CurrentRoom })
 	end
+	-- Room flow modelled on RoomLogic: doors get rooms + rewards when exits
+	-- unlock; LeaveRoom picks mirroring, the next encounter and the next seed
+	-- from whatever RNG state the player's actions left behind.
+	function G.ChooseNextRoomData() return { Name = 'F_Combat' .. string.format('%02d', rng(20)), FlipHorizontalChance = 0.5 } end
+	function G.CreateRoom(data) return { Name = data.Name, FlipHorizontalChance = data.FlipHorizontalChance } end
+	function G.ChooseRoomReward() return ({ 'Boon', 'MaxHealthDrop', 'RoomMoneyDrop', 'MetaCurrencyDrop' })[1 + rng(4)] end
+	function G.ChooseEncounter(run, room)
+		local enemies = { 'Grunt', 'Archer', 'Brute', 'Wisp' }
+		local waves = {}
+		for w = 1, 1 + rng(2) do
+			waves[w] = { Spawns = { { Name = enemies[1 + rng(4)], TotalCount = 1 + rng(4) } } }
+		end
+		return { Name = 'Generated' .. rng(1000), SpawnWaves = waves }
+	end
 	function G.LoadMap(args)
 		G.RandomInit()
 		local room = args.Room or { Name = args.Name }
-		room.Encounter = { Name = 'Generated' .. rng(1000) }
-		room.ChosenRewardType = ({ 'Boon', 'MaxHealthDrop', 'RoomMoneyDrop' })[1 + rng(3)]
+		room.Encounter = room.Encounter or G.ChooseEncounter(G.CurrentRun, room)
+		room.ChosenRewardType = room.ChosenRewardType or 'Boon'
 		G.StartRoom(G.CurrentRun, room)
 	end
 	function G.StartRoom(run, room)
 		run.CurrentRoom = room
 		run.RunDepthCache = 1 + #run.RoomHistory
 		G.MapState = { OfferedExitDoors = {} }
-		for i = 1, 2 do
-			local id = 1000 + rng(9000)
-			G.MapState.OfferedExitDoors[id] = { ObjectId = id, Room = { Name = 'F_Combat' .. string.format('%02d', rng(20)) } }
+		for i = 1, 3 do
+			local id = 1000 + i * 111
+			G.MapState.OfferedExitDoors[id] = { ObjectId = id }
 		end
 		sim.room_starts = sim.room_starts + 1
 	end
@@ -106,12 +122,28 @@ local function fake_game(sim, opts)
 		room.ExitsUnlocked = true
 		G.DoUnlockRoomExits(G.CurrentRun, room)
 	end
-	function G.DoUnlockRoomExits() end
+	function G.DoUnlockRoomExits(run, room)
+		G.RandomSynchronize()
+		local ids = {}
+		for id in pairs(G.MapState.OfferedExitDoors) do ids[#ids + 1] = id end
+		table.sort(ids)
+		for _, id in ipairs(ids) do
+			local door = G.MapState.OfferedExitDoors[id]
+			door.Room = G.CreateRoom(G.ChooseNextRoomData(run, nil, ids))
+			door.Room.ChosenRewardType = G.ChooseRoomReward(run, door.Room)
+		end
+	end
 	function G.LeaveRoom(run, door)
+		-- In-room player actions (crits, procs, ...) consume RNG differently per player.
+		for _ = 1, (sim.action_noise or 0) do rng(97) end
+		local next_room = door.Room
+		if next_room.Flipped == nil then next_room.Flipped = rng(2) == 0 end
 		table.insert(run.RoomHistory, run.CurrentRoom)
+		run.RunDepthCache = 1 + #run.RoomHistory
+		next_room.Encounter = G.ChooseEncounter(run, next_room)
 		G.RandomSetNextInitSeed()
 		G.wait(0.1)
-		G.LoadMap({ Name = door.Room.Name, Room = door.Room })
+		G.LoadMap({ Name = next_room.Name, Room = next_room })
 	end
 	function G.Kill(victim) if victim == G.CurrentRun.Hero then G.KillHero(victim, {}) end end
 	function G.KillHero(victim)
@@ -152,7 +184,8 @@ end
 
 -- opts: { name, data_dir, config_dir, bot = table|nil, game = 'fake'|'empty', progress = n }
 function Sim.new(opts)
-	local sim = setmetatable({ threads = {}, wraps = {}, room_starts = 0, logs = {}, always = {}, imgui = {}, menu = {} }, Sim)
+	local sim = setmetatable({ threads = {}, wraps = {}, room_starts = 0, logs = {}, always = {}, imgui = {}, menu = {},
+		action_noise = opts.action_noise }, Sim)
 	sim.name = opts.name
 	local G = opts.game == 'empty' and {} or fake_game(sim, opts)
 	sim.G = G

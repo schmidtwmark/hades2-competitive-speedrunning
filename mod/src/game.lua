@@ -27,7 +27,8 @@ local KEEPSAKE_LEVEL = 3
 
 local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', 'StartRoom', 'KillHero', 'RecordRunCleared',
 	'EquipKeepsake', 'DoUnlockRoomExits', 'StartNewGame', 'RequestSave', 'DeathAreaSwitchRoom', 'ValidateCheckpoint',
-	'InvalidateCheckpoint' }
+	'InvalidateCheckpoint', 'LeaveRoom', 'RandomSetNextInitSeed', 'ChooseEncounter', 'RunShopGeneration', 'ChooseNextRoomData',
+	'CreateRoom', 'ChooseRoomReward', 'GetNextSpawn', 'HandleNextSpawn', 'Load' }
 
 function Game.new(deps)
 	local g = setmetatable({}, Game)
@@ -122,8 +123,12 @@ end
 
 function Game:status_line()
 	if self.status then return self.status end
-	if self.client and self.client:phase() == 'ready_check' and not self:in_hub() then
-		return 'Go to the Crossroads: races start from the hub.'
+	if self.client and self.client:phase() == 'ready_check' then
+		if not self:in_hub() then return 'Go to the Crossroads: races start from the hub.' end
+		if self:competitive_active() then
+			local w = self.client.state.vote_results.weapon
+			return 'Set your Arcana, familiar and ' .. self:display_name(w and w.selected or '') .. ' aspect, then press Ready.'
+		end
 	end
 	return nil
 end
@@ -196,6 +201,166 @@ function Game:hooks_installed()
 	return reg and reg.installed or {}
 end
 
+-- Per-depth seeds -------------------------------------------------------------------
+-- Inside a race run every random decision that shapes a room (which room, its
+-- encounter and enemies, mirroring, shop stock, door rewards) is re-seeded
+-- from (race seed, tag, depth, ...), so it can't depend on what the player did
+-- earlier. Choices still matter where the game reads run state (e.g. which
+-- gods you've taken), which is intended.
+
+local SEED_MOD = 2147483629
+
+local function unpack_results(results)
+	return (table.unpack or unpack)(results, 2, #results)
+end
+
+local function hash_seed(...)
+	local h = 7
+	for i = 1, select('#', ...) do
+		local part = tostring((select(i, ...)))
+		for j = 1, #part do h = (h * 31 + part:byte(j)) % SEED_MOD end
+		h = (h * 31 + 59) % SEED_MOD
+	end
+	return h + 1
+end
+Game.hash_seed = hash_seed
+
+function Game:race_seed()
+	if self.launching then return self.launching.seed end
+	if self:race_run_live() then return self.race.race.seed end
+	return nil
+end
+
+function Game:race_depth()
+	local run = self.G.CurrentRun
+	if not run then return 0 end
+	return run.RunDepthCache or (1 + #(run.RoomHistory or {}))
+end
+
+-- Seed the global RNG from the race seed and tags; leave NextSeeds alone so the
+-- game's own RandomSynchronize calls keep using the room seed.
+function Game:reseed(...)
+	local seed = self:race_seed()
+	if not seed or (self.mutations and self.mutations.no_depth_seed) then return false end
+	local G = self.G
+	local s = hash_seed(seed, ...)
+	local old = G.NextSeeds[1]
+	G.NextSeeds[1] = s
+	G.RandomInit(1)
+	G.NextSeeds[1] = old
+	return true
+end
+
+function Game:hook_LeaveRoom(base, run, door)
+	if self:race_seed() and door and door.Room and run then
+		local next_room, depth = door.Room, self:race_depth() + 1
+		-- Mirroring: the game uses RandomChance on the current room's RNG unless
+		-- the room geometry decides it. Decide it from the seed instead.
+		local cur = run.CurrentRoom
+		local geometric = cur and cur.ExitDirection ~= nil and next_room.EntranceDirection ~= nil
+			and next_room.EntranceDirection ~= 'LeftRight'
+		if next_room.Flipped == nil and not geometric and not (self.mutations and self.mutations.no_depth_seed) then
+			local roll = (hash_seed(self:race_seed(), 'flip', depth) % 10000) / 10000
+			next_room.Flipped = roll < (next_room.FlipHorizontalChance or 0.5)
+		end
+		self.leaving_depth = depth
+	end
+	return base(run, door)
+end
+
+-- LeaveRoom queues the next room's seed with a draw from the current RNG; use
+-- a per-depth seed instead.
+function Game:hook_RandomSetNextInitSeed(base, args)
+	if args == nil and self.leaving_depth and self:race_seed() and not (self.mutations and self.mutations.no_depth_seed) then
+		local depth = self.leaving_depth
+		self.leaving_depth = nil
+		return base({ Seed = hash_seed(self:race_seed(), 'room', depth) })
+	end
+	return base(args)
+end
+
+function Game:hook_ChooseEncounter(base, run, room, args)
+	self:reseed('encounter', self:race_depth(), room and room.Name, args and args.LegalEncounters and 'cage' or 'main')
+	return base(run, room, args)
+end
+
+function Game:hook_RunShopGeneration(base, room)
+	self:reseed('shop', self:race_depth(), room and room.Name)
+	return base(room)
+end
+
+-- Every generic exit door at a depth leads to the same next room; each door
+-- keeps its own reward (chosen later per door).
+function Game:hook_ChooseNextRoomData(base, run, args, other_doors)
+	local ctx = self.unlock_ctx
+	if not (ctx and self:race_seed()) or args ~= nil or (self.mutations and self.mutations.no_depth_seed) then
+		return base(run, args, other_doors)
+	end
+	if ctx.room_data then return ctx.room_data end
+	self:reseed('route', ctx.depth)
+	ctx.room_data = base(run, args, other_doors)
+	return ctx.room_data
+end
+
+function Game:hook_CreateRoom(base, room_data, args)
+	if self.unlock_ctx and room_data then self:reseed('create', self.unlock_ctx.depth, room_data.Name) end
+	return base(room_data, args)
+end
+
+-- Reward picks offset the RNG by the reroll count; spent rerolls must not shift
+-- later rooms, so use the count the run started with.
+function Game:hook_ChooseRoomReward(base, run, room, store, previous, args)
+	if self:race_seed() and run and self.race and self.race.base_rerolls then
+		local saved = run.NumRerolls
+		run.NumRerolls = self.race.base_rerolls
+		local ok, res = pcall(base, run, room, store, previous, args)
+		run.NumRerolls = saved
+		if not ok then error(res, 0) end
+		return res
+	end
+	return base(run, room, store, previous, args)
+end
+
+-- Spawns happen mid-combat on the same RNG that crits and procs use. Make the
+-- spawn decisions (which enemy next, enemy-set swaps, spawn point shuffle)
+-- depend only on (depth, encounter, spawn #), then resume the combat stream
+-- from a value drawn before, so combat rolls don't become predictable.
+-- Spawn *points* still depend on where the hero stands (eligibility checks).
+function Game:spawn_seeded(base, tag, encounter, ...)
+	if not (self:race_seed() and type(encounter) == 'table') or (self.mutations and self.mutations.no_depth_seed) then
+		return base(encounter, ...)
+	end
+	local G = self.G
+	encounter.RaceSpawnCounts = encounter.RaceSpawnCounts or {}
+	local n = (encounter.RaceSpawnCounts[tag] or 0) + 1
+	encounter.RaceSpawnCounts[tag] = n
+	local resume = G.RandomInt(1, 1000000000)
+	self:reseed(tag, self:race_depth(), encounter.Name, n)
+	local results = { pcall(base, encounter, ...) }
+	self:reseed('resume', resume)
+	if not results[1] then error(results[2], 0) end
+	return unpack_results(results)
+end
+
+function Game:hook_GetNextSpawn(base, encounter)
+	local spawn_info = self:spawn_seeded(base, 'next', encounter)
+	pcall(self.record_spawn, self, spawn_info)
+	return spawn_info
+end
+
+function Game:hook_HandleNextSpawn(base, encounter, ...)
+	return self:spawn_seeded(base, 'spawn', encounter, ...)
+end
+
+-- Trace: the order enemies were picked to spawn in, per room.
+function Game:record_spawn(spawn_info)
+	if not (self.race and self.race.rooms and type(spawn_info) == 'table') then return end
+	local entry = self.race.rooms[#self.race.rooms]
+	if not entry then return end
+	entry.spawns = entry.spawns or {}
+	entry.spawns[#entry.spawns + 1] = tostring(spawn_info.Name)
+end
+
 -- Seed the global RNG now and queue the same seed for the next map load, so
 -- both StartNewRun's choices and the first room's RandomInit are fixed.
 function Game:apply_seed(seed)
@@ -215,7 +380,8 @@ function Game:hook_StartNewRun(base, prevRun, args)
 	if race then
 		self.launching = nil
 		pcall(self.apply_seed, self, race.seed)
-		self.race = { race = race, run = self.G.CurrentRun, rooms = {}, finished = false }
+		self.race = { race = race, run = self.G.CurrentRun, rooms = {}, finished = false,
+			base_rerolls = self.G.CurrentRun and self.G.CurrentRun.NumRerolls }
 		self.log('game: race run created for race ' .. tostring(race.race_id))
 	end
 	return run
@@ -258,6 +424,8 @@ function Game:on_room_start(run, room)
 		seed = rng and rng.seed,
 		encounter = room and room.Encounter and room.Encounter.Name,
 		reward = room and room.ChosenRewardType,
+		flipped = room and room.Flipped,
+		enemies = self:encounter_digest(room and room.Encounter),
 	}
 	local rooms = self.race.rooms
 	rooms[#rooms + 1] = entry
@@ -266,10 +434,45 @@ function Game:on_room_start(run, room)
 	if self.client then self.client:report_progress(self:progress(), true) end
 end
 
+-- "wave1: A x3, B x2 | wave2: ..." from the generated encounter.
+function Game:encounter_digest(encounter)
+	if type(encounter) ~= 'table' or type(encounter.SpawnWaves) ~= 'table' then return nil end
+	local waves = {}
+	for i, wave in ipairs(encounter.SpawnWaves) do
+		local spawns = {}
+		for _, sp in ipairs(wave.Spawns or {}) do
+			spawns[#spawns + 1] = tostring(sp.Name) .. ' x' .. tostring(sp.TotalCount or sp.CountMax or '?')
+		end
+		table.sort(spawns)
+		waves[#waves + 1] = 'w' .. i .. ': ' .. table.concat(spawns, ', ')
+	end
+	return table.concat(waves, ' | ')
+end
+
 function Game:hook_DoUnlockRoomExits(base, run, room)
-	local res = base(run, room)
+	if self:race_seed() then self.unlock_ctx = { depth = self:race_depth() } end
+	local ok, res = pcall(base, run, room)
+	self.unlock_ctx = nil
+	if not ok then error(res, 0) end
 	self.exits_unlocked_for = room
+	pcall(self.record_doors, self, room)
 	return res
+end
+
+-- Trace: what each offered door leads to (room + reward), sorted by door id.
+function Game:record_doors(room)
+	if not (self.race and self.race.rooms) then return end
+	local entry = self.race.rooms[#self.race.rooms]
+	if not entry then return end
+	local doors = {}
+	for id, door in pairs((self.G.MapState and self.G.MapState.OfferedExitDoors) or {}) do
+		if type(door) == 'table' and door.Room then
+			doors[#doors + 1] = { id = door.ObjectId or id, room = door.Room.Name, reward = door.Room.ChosenRewardType,
+				loot = door.Room.ForceLootName }
+		end
+	end
+	table.sort(doors, function(a, b) return a.id < b.id end)
+	entry.doors = doors
 end
 
 function Game:hook_KillHero(base, victim, triggerArgs)
@@ -338,6 +541,17 @@ function Game:hook_StartNewGame(base, mapName)
 	for k, v in pairs(summary) do parts[#parts + 1] = k .. '=' .. tostring(v) end
 	table.sort(parts)
 	self.log('game: competitive profile built for ' .. tostring(mapName) .. ': ' .. table.concat(parts, ' '))
+end
+
+-- The engine calls Load(data) when a real profile is loaded (e.g. PLAY after
+-- leaving competitive mode). From then on saves must work normally again.
+function Game:hook_Load(base, data)
+	local c = self.G.RankedRaceCompetitive
+	if c and (c.active or c.requested) then
+		self.log('game: real profile loaded; leaving competitive mode')
+		c.active, c.requested = false, false
+	end
+	return base(data)
 end
 
 -- Belt and braces on top of IllegalConversationModification: competitive mode never saves.
@@ -638,7 +852,10 @@ function Game:bot_advance_room()
 	end
 	if a.phase == 'engage' then
 		local room = a.room
-		if room.ExitsUnlocked or self.exits_unlocked_for == room then
+		-- Wait for DoUnlockRoomExits to finish assigning rooms to every door:
+		-- room.ExitsUnlocked is set before that runs (only pre-made doors, like
+		-- a Chaos gate, have a room then). Fall back after 20 s.
+		if self.exits_unlocked_for == room or (room.ExitsUnlocked and now - a.t0 > 20) then
 			a.phase = 'pick_door'
 		elseif now >= a.next_act then
 			a.next_act = now + 1
@@ -668,15 +885,19 @@ function Game:bot_advance_room()
 		end
 	elseif a.phase == 'pick_door' then
 		local doors = G.MapState and G.MapState.OfferedExitDoors
+		local highest = self.bot_cfg and self.bot_cfg.door_pick == 'highest'
 		local best
 		for id, door in pairs(doors or {}) do
 			if type(door) == 'table' and door.Room then
 				local oid = door.ObjectId or id
-				if not best or oid < (best.ObjectId or math.huge) then best = door end
+				local better = not best or (highest and oid > best.ObjectId) or (not highest and oid < best.ObjectId)
+				if better then best = door; best.ObjectId = oid end
 			end
 		end
 		if best then
 			a.door = best
+			local entry = self.race.rooms[#self.race.rooms]
+			if entry then entry.taken = { id = best.ObjectId, reward = best.Room and best.Room.ChosenRewardType } end
 			self.log('game: bot leaving via door ' .. tostring(best.ObjectId) .. ' to ' .. tostring(best.Room and best.Room.Name))
 			self:spawn(G.LeaveRoom, run, best)
 			a.phase = 'wait_room'
@@ -698,7 +919,13 @@ function Game:bot_collect_rewards(a)
 	if G.AreScreensActive and G.AreScreensActive() then return end
 	a.used = a.used or {}
 	local now = self.now()
-	for id, obj in pairs((G.MapState and G.MapState.RoomRequiredObjects) or {}) do
+	for id, required in pairs((G.MapState and G.MapState.RoomRequiredObjects) or {}) do
+		-- The live object (what OnUsed would receive) may be a different table;
+		-- consumables default to UseConsumableItem (CreateConsumableItemFromData).
+		local obj = (G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id]) or required
+		if type(obj) == 'table' and not obj.OnUsedFunctionName and G.ConsumableData and G.ConsumableData[obj.Name] then
+			obj.OnUsedFunctionName = 'UseConsumableItem'
+		end
 		if now - (a.used[id] or -math.huge) > 8 and type(obj) == 'table' and obj.OnUsedFunctionName then
 			a.used[id] = now
 			self.log('game: bot using ' .. tostring(obj.Name) .. ' via ' .. obj.OnUsedFunctionName)
@@ -731,6 +958,12 @@ function Game:bot_choose_upgrade()
 	local screen = G.ScreenAnchors and G.ScreenAnchors.ChoiceScreen
 	if not (screen and screen.Components) or screen.ChoiceMade or screen.bot_chose then return end
 	local button = screen.Components.PurchaseButton1
+	if self.bot_cfg and self.bot_cfg.boon_pick == 'last' then
+		for i = 4, 2, -1 do
+			local b = screen.Components['PurchaseButton' .. i]
+			if b and b.Data then button = b; break end
+		end
+	end
 	if not (button and button.Data) then return end
 	screen.bot_chose = true
 	self.log('game: bot choosing ' .. tostring(button.Data.Name))

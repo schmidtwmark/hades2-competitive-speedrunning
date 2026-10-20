@@ -45,6 +45,7 @@ function Bot.new(deps)
 	if cfg.name then b.client.name = cfg.name end
 	-- Mutation twins: deliberately break a feature so its test must fail.
 	b.game.mutations = cfg.mutations or {}
+	b.game.bot_cfg = cfg
 	b.log('bot: active role=' .. tostring(cfg.role) .. ' outcome=' .. tostring(cfg.outcome))
 	b.client.on.vote_phase = function(v) b:on_vote(v) end
 	return b
@@ -64,6 +65,11 @@ end
 
 function Bot:finish(pass, why)
 	if self.step == 'done' then return end
+	-- Always leave a trace (also on failure) so two clients can still be compared.
+	if not self.trace_written and self.trace then
+		self.trace_written = true
+		pcall(self.write_trace, self)
+	end
 	for _, c in ipairs(self.checks) do
 		if not c.ok then pass = false end
 	end

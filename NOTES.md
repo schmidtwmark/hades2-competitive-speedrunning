@@ -24,6 +24,8 @@ were re-checked against this build's own `Content/Scripts` (copied to `local/gam
 | **Real game vs mock opponent** | verified | `scripts/e2e-vs-mock.sh game_wins` and `game_dies`: PASS |
 | **Two real game clients race** | verified | `scripts/e2e-two-games.sh 3`: both bots PASS, survivor_finished |
 | **Same seed -> same rooms (two different save copies)** | verified for 7 rooms | traces identical: room, per-room seed, encounter, reward, boon offered (incl. a shop) |
+| **Competitive mode: title entry, maxed profile, no saves** | verified | `COMPETITIVE=1 scripts/e2e-vs-mock.sh`: profile checks + 11 save files byte-identical |
+| **Diverging choices -> same rooms/enemies/spawn order** | verified for 7 depths | `COMPETITIVE=1 DIVERGE=1 scripts/e2e-two-games.sh` |
 | Determinism check can fail | checked | `MUTATE=no_seed`: "seed applied" FAILs, rooms diverge from room 3 (rooms 1-2 are forced intro rooms) |
 | Lobby window + HUD draw in game | verified | `show_ui` runs log no UI errors; window captures show the HUD with live opponent data |
 | **Full suite** | green | `scripts/suite.sh --game`: 9/9 gates (2026-10-20) |
@@ -81,6 +83,36 @@ The two save copies differed only by a few test deaths/runs; far-apart saves are
 - Under gamescope, xdotool input does not reach the game; the test bot presses the menu entry by calling
   `OpenPatchNotes(this)` from a `MainMenuScreen::Update` hook (test mode only).
 - Tools: `scripts/pdb_symbols.py` (PDB publics -> RVAs), `scripts/disasm.py` (annotated disassembly).
+
+## Per-depth RNG (same rooms and enemies regardless of choices) — verified on the tested build
+
+Rule (from the owner): both racers face the same room and enemies at each depth; choices only change
+rewards. Vanilla chains each room's seed from the previous room's RNG state (LeaveRoom ->
+`RandomSetNextInitSeed()`), so in-room actions and door choices change everything after.
+
+Inside a race run the mod re-seeds from `hash(raceSeed, tag, depth, ...)` at each decision and restores
+`NextSeeds`, so the game's own `RandomSynchronize` calls still work:
+- `LeaveRoom`: mirroring (unless geometry decides it), next room seed (`RandomSetNextInitSeed` args),
+  next encounter (`ChooseEncounter`), shop stock (`RunShopGeneration`).
+- `DoUnlockRoomExits`: every generic door gets the same `ChooseNextRoomData` result; `CreateRoom` re-seeded per
+  depth; each door keeps its own reward; `ChooseRoomReward` uses the run's starting reroll count.
+- `GetNextSpawn` / `HandleNextSpawn`: re-seeded per (depth, encounter, spawn #); combat RNG resumes from a value
+  drawn before, so crits/procs aren't predictable from spawns. Spawn *points* still depend on hero position.
+
+Evidence: `COMPETITIVE=1 DIVERGE=1 scripts/e2e-two-games.sh 6` on two real clients, B taking other doors
+(depths 2, 4, 5) and other boons: rooms, room seeds, mirroring, encounters, enemy rosters and spawn order
+identical for 7 depths (incl. the Treant miniboss, a Nemesis event); door rewards differed only where god
+eligibility did. An earlier run was hollow (the bot picked before doors had rooms); the comparison now fails a
+divergence run in which the players never took different doors. Offline twin: `MUTATE=no_depth_seed
+scripts/test-sim.sh` fails.
+
+Consequences: a shop/fountain at a depth is compulsory for both players; Chaos gates are just another door.
+
+## Deployment (owner's r2modman profile on the test PC)
+
+`scripts/bazzite/deploy-r2modman.sh` installs the mod and the tested Hell2Modding 1.0.117 / ModUtil 4.0.1
+dependency set into the r2modman "Default" profile (and the game's `Ship/d3d12.dll`), updating `mods.yml`
+versions. First deploy replaced H2M 1.0.103 and the earlier attempt's symlink; backup in `~/h2r-backup-*`.
 
 ## Test bed (test PC)
 

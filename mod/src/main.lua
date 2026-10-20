@@ -116,6 +116,17 @@ if config.autoconnect or (bot.active and bot.step ~= 'idle') then client:connect
 -- always_draw callbacks run on the game's script thread every frame (unless a
 -- frame is skipped), with the Lua state locked, so touching game state is safe.
 
+-- First arrival in the competitive hub: open the lobby window and connect.
+local competitive_ui_opened = false
+local function competitive_arrival()
+	if competitive_ui_opened or bot.active or not game:competitive_active() or not game:in_hub() then return end
+	competitive_ui_opened = true
+	log('competitive: in the hub; opening the lobby window')
+	ui.visible = true
+	if not rom.gui.is_open() then rom.gui.toggle() end
+	if client.state.conn == 'disconnected' and not client.want_connected then client:connect() end
+end
+
 local function frame()
 	if ui.visible and bot.active and bot.cfg.show_ui and not rom.gui.is_open() then rom.gui.toggle() end
 	if rom.ImGui.IsKeyPressed(rom.ImGuiKey.F8, false) then
@@ -123,6 +134,7 @@ local function frame()
 		-- Text boxes only get keyboard focus while the H2M overlay is open.
 		if ui.visible and not rom.gui.is_open() then rom.gui.toggle() end
 	end
+	competitive_arrival()
 	client:update()
 	game:update()
 	bot:update()
