@@ -25,11 +25,9 @@ Board.colors = { GOLD = GOLD, GREEN = GREEN, RED = RED, GREY = GREY }
 
 local REASONS = {
 	completed_first = 'First to clear the run.',
-	survivor_finished = 'Outlasted the rival.',
-	both_died = 'Both racers fell.',
-	survivor_timeout = 'The survivor ran out of time.',
-	forfeit = 'A racer forfeited.',
-	disconnect = 'A racer disconnected.',
+	survivor_finished = 'The only racer to finish.',
+	no_finishers = 'Neither racer finished.',
+	time_limit = 'The race hit its time limit.',
 }
 
 local function fmt_clock(t)
@@ -52,6 +50,51 @@ function Board.code_slots(code)
 	return table.concat(out, ' ')
 end
 
+-- Results screen rows (like the game's run clear screen): which way is better.
+Board.STAT_ROWS = {
+	{ key = 'DamageDealt', label = 'Damage Dealt', better = 'high' },
+	{ key = 'DamageTaken', label = 'Damage Taken', better = 'low' },
+	{ key = 'Kills', label = 'Foes Slain', better = 'high' },
+	{ key = 'Healed', label = 'Health Restored' },
+	{ key = 'GoldEarned', label = 'Gold Earned' },
+	{ key = 'Rooms', label = 'Chambers Cleared', better = 'high' },
+	{ key = 'DeathDefiancesUsed', label = 'Death Defiances Used', better = 'low' },
+	{ key = 'Boons', label = 'Boons' },
+	{ key = 'Hammers', label = 'Daedalus Hammers' },
+}
+
+local OUTCOME_TEXT = { cleared = 'Cleared', died = 'Fell', forfeit = 'Forfeited', disconnect = 'Disconnected', timeout = 'Out of Time' }
+
+-- "Cleared 12:34.56" / "Fell at 8:12.30" for one racer's result entry.
+function Board.result_line(e)
+	local word = OUTCOME_TEXT[e.outcome] or (e.victory and 'Cleared' or 'Did Not Finish')
+	if type(e.time) ~= 'number' then return word, e.victory and GREEN or RED end
+	if e.victory then return word .. ' ' .. fmt_clock(e.time), GREEN end
+	return word .. ' at ' .. fmt_clock(e.time), RED
+end
+
+function Board.compare(me, them)
+	local function side(e)
+		local text, color = Board.result_line(e)
+		local depth = e.depth and ('Depth ' .. e.depth) or nil
+		return { name = Board.safe(e.name), result = text, color = color, depth = depth, build = e.build or {} }
+	end
+	local out = { me = side(me), them = side(them), rows = {} }
+	local ms, ts = me.stats or {}, them.stats or {}
+	for _, row in ipairs(Board.STAT_ROWS) do
+		local a, b = ms[row.key], ts[row.key]
+		if a ~= nil or b ~= nil then
+			local win
+			if row.better and type(a) == 'number' and type(b) == 'number' and a ~= b then
+				win = ((a > b) == (row.better == 'high')) and 'me' or 'them'
+			end
+			out.rows[#out.rows + 1] = { label = row.label, me = a ~= nil and tostring(a) or '-',
+				them = b ~= nil and tostring(b) or '-', win = win }
+		end
+	end
+	return out
+end
+
 -- Page description for the current state. `ui` is the board's own state
 -- (page, typed code); `names(id)` gives display names.
 function Board.view(c, ui, now, names)
@@ -61,6 +104,24 @@ function Board.view(c, ui, now, names)
 	local function line(text, color) d.lines[#d.lines + 1] = { text = text, color = color } end
 	local function button(key, label, action, arg)
 		d.buttons[#d.buttons + 1] = { key = key, label = label, action = action or key, arg = arg }
+	end
+
+	-- In-run prompt from the pause menu's "Forfeit Race" (or Quit).
+	if ui.prompt == 'forfeit' then
+		local opp_name = Board.safe(c:opponent_name() or 'your rival')
+		local dec = st.decided
+		d.id, d.title, d.title_color = 'prompt:forfeit', 'Forfeit the Race?', RED
+		line('Your run ends here and counts as a DNF.')
+		if dec and not dec.you_won and not dec.draw then
+			line(opp_name .. ' has already won the race.', GREY)
+		else
+			line(opp_name .. ' still has to finish to win.', GREY)
+		end
+		button('forfeit', 'Forfeit', 'forfeit_confirm')
+		button('keep', 'Keep Racing', 'prompt_cancel')
+		d.focus = 'keep'
+		d.cancel = { action = 'prompt_cancel', label = '{CN} Keep Racing' }
+		return d
 	end
 
 	if st.conn ~= 'connected' or not st.id then
@@ -151,19 +212,26 @@ function Board.view(c, ui, now, names)
 		line('The race is starting.')
 		d.close = true
 	elseif phase == 'racing' then
-		d.id, d.title = 'racing', 'Race in Progress'
-		line('Waiting for ' .. opp .. ' to finish...')
+		-- Back in the hub while the rival is still running (after a clear or a DNF).
+		local dec, mine = st.decided, st.race and st.race.completed
+		d.id = 'racing:' .. tostring(dec and dec.you_won) .. ':' .. tostring(mine and mine.forfeit)
+		d.title = dec and (dec.you_won and 'Victory' or 'Defeat') or 'Race in Progress'
+		d.title_color = dec and (dec.you_won and GREEN or RED) or nil
+		if dec and dec.you_won then line('You cleared first.', GREEN) end
+		local o = st.opponent
+		line(opp .. ' is still running' .. (o and o.depth and (': depth ' .. o.depth) or '') .. '.')
+		line('The full results appear when they finish.', GREY)
 	elseif phase == 'finished' then
 		local r = st.result or {}
 		d.id = 'finished:' .. tostring(st.rematch_requested)
 		d.title = r.draw and 'Draw' or (r.you_won and 'Victory' or 'Defeat')
 		d.title_color = r.draw and GOLD or (r.you_won and GREEN or RED)
 		line(REASONS[r.reason] or '', GREY)
+		local me, them
 		for _, e in ipairs(r.results or {}) do
-			local how = 'did not finish'
-			if e.finished then how = (e.victory and 'cleared at ' or 'fell at ') .. fmt_clock(e.time) end
-			line(Board.safe(e.name) .. ': ' .. how)
+			if e.id == lobby.you or e.id == st.id then me = e else them = e end
 		end
+		if me and them then d.compare = Board.compare(me, them) end
 		if st.rematch_requested then
 			line('Rematch requested. Waiting for ' .. opp .. '...', GREY)
 		else
@@ -228,7 +296,20 @@ function Board:act(action, arg)
 		c:rematch()
 	elseif action == 'leave' then
 		c:leave_lobby()
+	elseif action == 'forfeit_confirm' then
+		ui.prompt = nil
+		if self.game and self.game.forfeit_now then self.game:forfeit_now() end
+		self:close()
+	elseif action == 'prompt_cancel' then
+		ui.prompt = nil
+		self:close()
 	end
+end
+
+-- An in-run prompt (pause menu "Forfeit Race"): opens even outside the hub.
+function Board:prompt(kind)
+	self.ui.prompt = kind
+	self.log('board: prompt ' .. tostring(kind))
 end
 
 -- Press a control on the current page by its key (what the test bot does;
@@ -342,7 +423,9 @@ function Board:render(d)
 
 	local focus_id
 	local top = cy - 262 + #d.lines * 40 + 40
-	if d.grid then
+	if d.compare then
+		top = self:render_compare(d.compare, cx, top)
+	elseif d.grid then
 		local g, n = d.grid, #d.grid.items
 		local step_x = g.kind == 'weapon' and 150 or (g.kind == 'keys' and 96 or 104)
 		local step_y = g.kind == 'keys' and 90 or 118
@@ -393,7 +476,7 @@ function Board:render(d)
 	local nb = #d.buttons
 	for i, btn in ipairs(d.buttons) do
 		local x, y
-		if d.grid then
+		if d.grid or d.compare then
 			x, y = cx + (i - (nb + 1) / 2) * 440, math.max(top, cy + 200) + 40
 		else
 			x, y = cx, math.max(top + 30, cy - 60) + (i - 1) * 100
@@ -435,6 +518,49 @@ function Board:follow_input_mode()
 		self.log('board: controller picked up; cursor on the page focus')
 	end
 	self.used_mouse = mouse
+end
+
+-- Results screen: both racers side by side like the run clear screen's stats
+-- panel; the better value of each row in gold, boons with rarity frames below.
+local ICON_STEP, ICONS_PER_ROW = 44, 8
+function Board:render_compare(cmp, cx, top)
+	local G = self.G
+	local col = { me = cx - 250, them = cx + 250 }
+	local y = top
+	for _, who in ipairs({ 'me', 'them' }) do
+		local side = cmp[who]
+		self:label('Name_' .. who, col[who], y, side.name, 'P22UndergroundSCMedium', 30, GOLD)
+		self:label('Result_' .. who, col[who], y + 36, side.result, 'P22UndergroundSCMedium', 24, side.color)
+		if side.depth then self:label('Depth_' .. who, col[who], y + 66, side.depth, 'LatoMedium', 20, GREY) end
+	end
+	self:label('Versus', cx, y + 30, 'VS', 'P22UndergroundSCMedium', 26, GREY)
+	y = y + 112
+	for i, row in ipairs(cmp.rows) do
+		local ry = y + (i - 1) * 32
+		self:label('RowLabel' .. i, cx, ry, row.label, 'LatoMedium', 20, GREY)
+		self:label('RowMe' .. i, col.me, ry, row.me, 'NumericP22UndergroundSCMedium', 24, row.win == 'me' and GOLD or BODY)
+		self:label('RowThem' .. i, col.them, ry, row.them, 'NumericP22UndergroundSCMedium', 24, row.win == 'them' and GOLD or BODY)
+	end
+	y = y + #cmp.rows * 32 + 24
+	local rows_used = 0
+	for _, who in ipairs({ 'me', 'them' }) do
+		local shown = 0
+		for _, entry in ipairs(cmp[who].build or {}) do
+			local trait = G.TraitData and G.TraitData[entry.name]
+			if trait and trait.Icon then
+				local n = math.min(#cmp[who].build, ICONS_PER_ROW)
+				local c, r = shown % ICONS_PER_ROW, math.floor(shown / ICONS_PER_ROW)
+				local x = col[who] - (n - 1) * ICON_STEP / 2 + c * ICON_STEP
+				local iy = y + r * ICON_STEP
+				self:component('Boon_' .. who .. shown, { Name = 'BlankObstacle', X = x, Y = iy, Animation = trait.Icon, Scale = 0.3 })
+				local frame = entry.rarity and ('Frame_Boon_Menu_' .. entry.rarity) or 'BoonIcon_Frame_Common'
+				self:component('BoonFrame_' .. who .. shown, { Name = 'BlankObstacle', X = x, Y = iy, Animation = frame, Scale = 0.3 })
+				shown = shown + 1
+			end
+		end
+		rows_used = math.max(rows_used, math.ceil(shown / ICONS_PER_ROW))
+	end
+	return y + rows_used * ICON_STEP
 end
 
 -- Update texts in place when the page is the same (timers, rival status).
@@ -615,9 +741,13 @@ end
 
 function Board:tick(in_hub)
 	if in_hub then self:patch_stone() end
+	if self.ui.prompt == 'forfeit' and self.game and self.game.forfeit_available and not self.game:forfeit_available() then
+		self.ui.prompt = nil -- the run ended meanwhile
+	end
 	local d = Board.view(self.client, self.ui, self.now(), self.names)
+	local here = in_hub or self.ui.prompt ~= nil
 	if self:is_open() then
-		if d.close or not in_hub then
+		if d.close or not here then
 			self:close()
 		elseif d.id ~= self.rendered then
 			self:render(d)
@@ -626,10 +756,13 @@ function Board:tick(in_hub)
 			self:refresh(d)
 		end
 		self:follow_input_mode()
+	elseif self.ui.prompt then
+		if not self:other_screen_open() and self:input_allowed() then self:open() end
 	elseif in_hub and not d.close then
 		-- Open by itself on arrival and when the race needs the player.
+		-- A page counts as seen once it was rendered (render sets last_attention),
+		-- so one that can't open yet (input blocked during the walk-in) waits.
 		local attention = Board.wants_attention(d.id) and d.id ~= self.last_attention
-		if attention then self.last_attention = d.id end
 		local now = self.now()
 		if attention or (self.open_at and now >= self.open_at) then
 			-- Not during the hub's arrival presentation: it blocks input, and a

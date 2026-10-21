@@ -124,6 +124,16 @@ export function runMock(o: MockOptions): Promise<MockResult> {
         case "opponent_progress":
           res.opponentProgress += 1;
           break;
+        case "opponent_finished":
+          // Rival dropped out (died/forfeited) and we have no scripted finish: finish our run shortly.
+          if (!m.victory && o.outcome === "none") {
+            timers.push(setTimeout(() => send({ type: "run_complete", victory: true, time: (Date.now() - raceStart) / 1000 }), 2000));
+          }
+          break;
+        case "race_decided":
+          // Lost with no scripted finish: give up like a player would, which ends the race.
+          if (!m.you_won && o.outcome === "none") send({ type: "forfeit" });
+          break;
         case "race_result":
           res.result = m;
           finish(null);

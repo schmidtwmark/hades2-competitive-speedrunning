@@ -4,9 +4,18 @@ A 1v1 race mod for Hades II. Two players meet on the in-game Race Board, vote
 on a weapon and a keepsake, and start the same seeded run at the same moment.
 During the run you see your rival as a translucent shadow Melinoë whenever you
 are in the same room, plus a rival plate (top right) with their biome and
-depth, how far ahead or behind you they are, their HP and their boons. First
-to clear wins; if one dies, the other has to finish to win (both dying is a
-draw). Everything works with a controller; no keyboard or mod keys needed.
+depth, how far ahead or behind you they are, their HP and their boons, under a
+single real-time race clock that never pauses (the game's own timer, which
+stops for menus and boon choices, is hidden). Everything works with a
+controller; no keyboard or mod keys needed.
+
+Rules: the first racer to clear the run wins. Dying, forfeiting (pause menu →
+Forfeit Race) or disconnecting is a DNF: the other racer still has to clear to
+win, and if neither clears it is a draw. If your rival clears first you have
+lost, but you can keep going to finish your run and post your time. When both
+are done, a results screen compares your run with your rival's: result and
+time, depth, damage dealt and taken, foes slain, healing, gold, death defiances
+and both boon lists.
 
 ## Play
 

@@ -143,6 +143,18 @@ if bot.active and bot.cfg.probe_doors then game.probe_doors = true end
 local competitive = Competitive.new({ rom = rom, log = log, on_start = function() game:enter_competitive() end })
 local menu_ok, menu_err = pcall(competitive.install, competitive)
 if not menu_ok then log('competitive: install failed: ' .. tostring(menu_err)) end
+-- The in-memory competitive profile must never be saved, including by native
+-- code that skips the game's Lua save gate (pause menu Undo Night / Quit).
+local guard_ok, guard_err = pcall(competitive.install_save_guard, competitive, function() return game:competitive_active() end)
+if not guard_ok then log('competitive: save guard failed: ' .. tostring(guard_err)) end
+-- Pause menu: "Forfeit Race" (the relabelled Undo Night) and Quit mid-race ask
+-- to forfeit; in competitive mode Undo Night never runs.
+local pause_ok, pause_err = pcall(competitive.install_pause_hooks, competitive, {
+	give_up = function() return game:competitive_active() or game:forfeit_available() end,
+	quit = function() return game:forfeit_available() end,
+	forfeit_prompt = function() game:request_forfeit() end,
+})
+if not pause_ok then log('competitive: pause hooks failed: ' .. tostring(pause_err)) end
 if menu_ok and bot.active and bot.cfg.press_competitive_after then
 	local ok, err = pcall(competitive.install_test_press, competitive, bot.cfg.press_competitive_after, socket.gettime)
 	if not ok then log('competitive: test press install failed: ' .. tostring(err)) end

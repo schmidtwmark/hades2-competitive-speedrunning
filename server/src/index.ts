@@ -10,7 +10,7 @@ const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`)
 const server = new RaceServer({
   voteSeconds: Number(env.VOTE_SECONDS ?? 15),
   countdownMs: Number(env.COUNTDOWN_MS ?? 3000),
-  deathTimeoutMs: Number(env.DEATH_TIMEOUT_MS ?? 15 * 60 * 1000),
+  raceTimeLimitMs: Number(env.RACE_TIME_LIMIT_MS ?? 3 * 60 * 60 * 1000),
   reconnectGraceMs: Number(env.RECONNECT_GRACE_MS ?? 60 * 1000),
   idleLobbyMs: Number(env.IDLE_LOBBY_MS ?? 30 * 60 * 1000),
   pools: { weapon: WEAPONS, keepsake: KEEPSAKES },

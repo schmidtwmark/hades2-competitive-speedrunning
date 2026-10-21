@@ -23,6 +23,8 @@ GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /Require
 # QUEUE=1: both clients use Find Match instead of a private lobby code.
 # BOARD=1: lobby actions go through the native Race Board (code typed on its keys).
 # CODE=1: both clients enter the same random race code (no host).
+# SCENARIO=clear_then_forfeit: A clears first through the game's run clear
+#   screen; B is told mid-run, keeps going two more rooms, then forfeits.
 if [ "${COMPETITIVE:-0}" = 1 ]; then
   GAME_ARGS="/Windowed=true /Fullscreen=false $RES /RequireFocusToUpdate=false"
 fi
@@ -56,14 +58,18 @@ MUT_JSON=""
 for X in A B; do
   PICK=""
   [ "${DIVERGE:-0}" = 1 ] && [ "$X" = B ] && PICK='"door_pick":"highest","boon_pick":"last",'
-  if [ "$X" = A ]; then ROLE=host; EXTRA='"outcome":"win","win_after_opponent_death":true,"expect":"win","expect_reason":"survivor_finished"'
+  if [ "$X" = A ]; then ROLE=host; EXTRA='"outcome":"win","clear_screen":true,"win_after_opponent_death":true,"expect":"win","expect_reason":"survivor_finished"'
   else ROLE=join; EXTRA='"outcome":"die","expect":"lose","expect_reason":"survivor_finished"'; fi
+  if [ "${SCENARIO:-}" = clear_then_forfeit ]; then
+    if [ "$X" = A ]; then EXTRA='"outcome":"win","clear_screen":true,"expect":"win","expect_reason":"completed_first"'
+    else EXTRA='"outcome":"forfeit","rooms":'$((ROOMS + 2))',"expect":"lose","expect_reason":"completed_first"'; fi
+  fi
   [ "${QUEUE:-0}" = 1 ] && ROLE=queue
   [ "${CODE:-0}" = 1 ] && ROLE=code
   cat >"$RUN/bot-$X.json" <<JSON
 {"role":"$ROLE","name":"Bot$X","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
  "code_file":"Z:$TB/run/code","weapon":"WeaponAxe","keepsake":"BossPreDamageKeepsake",
- "timeout":$((TIMEOUT - 60)),"quit_after":5,"show_ui":${SHOW_UI:-true},"dwell":${DWELL:-0},"expect_overlay":$([ "${OVERLAY:-0}" = 1 ] && echo true || echo false),"use_board":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"race_code":"$RACE_CODE","mutations":{$MUT_JSON},$COMP_JSON$PICK
+ "timeout":$((TIMEOUT - 60)),"quit_after":${QUIT_AFTER:-5},"show_ui":${SHOW_UI:-true},"dwell":${DWELL:-0},"expect_overlay":$([ "${OVERLAY:-0}" = 1 ] && echo true || echo false),"use_board":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"expect_results_screen":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"race_code":"$RACE_CODE","mutations":{$MUT_JSON},$COMP_JSON$PICK
  $EXTRA}
 JSON
   D="$(data $X)"
@@ -79,6 +85,13 @@ while :; do
   sleep 5
 done
 sleep 3
+# QUIT_AFTER: the games linger on their result screens (recordings); let them close themselves.
+if [ -n "${QUIT_AFTER:-}" ]; then
+  for _ in $(seq $(( QUIT_AFTER + 30 ))); do
+    ssh "$HOST" "$TB/instance.sh status A; $TB/instance.sh status B" | grep -q ': active' || break
+    sleep 1
+  done
+fi
 for X in A B; do
   D="$(data $X)"
   for f in bot-result.txt trace.json ranked.log; do scp -q "$HOST:$D/$f" "$RUN/$X-$f" 2>/dev/null; done

@@ -17,6 +17,9 @@ import {
   type ServerMessage,
   type VoteOption,
   type VotePhase,
+  type BuildEntry,
+  type Outcome,
+  type RunStats,
 } from "./protocol.js";
 
 export interface Scheduler {
@@ -43,8 +46,8 @@ export const realRandom: Random = {
 export interface ServerOptions {
   voteSeconds: number;
   countdownMs: number;
-  /** After the first death, how long the survivor has to finish before a draw. */
-  deathTimeoutMs: number;
+  /** Hard cap on a race (real time from the start); anyone still running then is a DNF. */
+  raceTimeLimitMs: number;
   /** How long a dropped player may reconnect before they leave / forfeit. */
   reconnectGraceMs: number;
   idleLobbyMs: number;
@@ -58,11 +61,31 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const isLobbyCode = (code: string) => code.length === 4 && [...code].every((ch) => CODE_ALPHABET.includes(ch));
 const MAX_SEED = 2 ** 31 - 1;
 
+interface RunResult {
+  outcome: Outcome;
+  victory: boolean;
+  /** Official time: server clock since the race start, seconds (null for a DNF before the start). */
+  time: number | null;
+  clientTime: number | null;
+  stats?: RunStats;
+  build?: BuildEntry[];
+}
+
 interface RaceState extends RaceSetup {
   startAt: number | null;
-  results: Map<string, { victory: boolean; time: number; serverTime: number }>;
+  /** Everyone who started, kept even if they leave, so results stay complete. */
+  entrants: { id: string; name: string }[];
+  /** Insertion order is finishing order. */
+  results: Map<string, RunResult>;
   progress: Map<string, Progress>;
-  decided: boolean;
+  /** Latest build/stats per racer (progress only carries the build when it changes). */
+  build: Map<string, BuildEntry[]>;
+  stats: Map<string, RunStats>;
+  /** undefined until decided; null = draw. */
+  winner: string | null | undefined;
+  reason: ResultReason | null;
+  decidedSent: boolean;
+  over: boolean;
 }
 
 class Lobby {
@@ -75,7 +98,7 @@ class Lobby {
   race: RaceState | null = null;
   raceCounter = 0;
   timer: unknown = null;
-  deathTimer: unknown = null;
+  raceTimer: unknown = null;
 
   constructor(
     readonly code: string,
@@ -189,13 +212,13 @@ export class RaceServer {
         return this.onProgress(s, progress);
       }
       case "run_complete":
-        return this.onRunComplete(s, msg.victory, msg.time);
+        return this.onRunComplete(s, msg.victory, msg.time, msg.stats, msg.build);
       case "ghost": {
         const { type: _t, ...ghost } = msg;
         return this.onGhost(s, ghost);
       }
       case "forfeit":
-        return this.onForfeit(s, "forfeit");
+        return this.onForfeit(s, "forfeit", msg.stats, msg.build);
       case "rematch":
         return this.onRematch(s);
     }
@@ -236,6 +259,14 @@ export class RaceServer {
         if (lobby.phase === "voting_weapon" || lobby.phase === "voting_keepsake") {
           const phase: VotePhase = lobby.phase === "voting_weapon" ? "weapon" : "keepsake";
           prev.send({ type: "vote_phase", phase, options: this.opts.pools[phase], timer: this.opts.voteSeconds });
+        }
+        // A race still running: replay what decided-but-unfinished state they missed.
+        const race = lobby.race;
+        if (race && !race.over && lobby.phase === "racing") {
+          const opp = lobby.opponentOf(prev);
+          const oppResult = opp ? race.results.get(opp.id) : undefined;
+          if (oppResult) prev.send({ type: "opponent_finished", victory: oppResult.victory, time: oppResult.time, outcome: oppResult.outcome });
+          if (race.decidedSent) prev.send(this.decidedMessage(race, prev));
         }
       }
       return;
@@ -365,11 +396,11 @@ export class RaceServer {
     s.send({ type: "lobby_left" });
   }
 
-  /** Take a player out of their lobby; an unfinished race counts as a loss for them. */
-  private removeFromLobby(s: Session, reason: ResultReason): void {
+  /** Take a player out of their lobby; an unfinished run counts as a DNF for them. */
+  private removeFromLobby(s: Session, outcome: "forfeit" | "disconnect"): void {
     const lobby = s.lobby;
     if (!lobby) return;
-    if (lobby.phase === "racing" || lobby.phase === "countdown") this.onForfeit(s, reason);
+    if (lobby.phase === "racing" || lobby.phase === "countdown") this.onForfeit(s, outcome);
     lobby.players = lobby.players.filter((p) => p !== s);
     s.lobby = null;
     if (s.graceTimer !== null) {
@@ -379,6 +410,11 @@ export class RaceServer {
     this.log(`lobby ${lobby.code} left by ${s.id}`);
     if (lobby.players.length === 0) {
       this.closeLobby(lobby);
+      return;
+    }
+    // The one who stays may still be running: their race goes on to the end.
+    if (lobby.race && !lobby.race.over && (lobby.phase === "racing" || lobby.phase === "countdown")) {
+      this.broadcastState(lobby);
       return;
     }
     // Back to waiting for a new opponent.
@@ -398,9 +434,9 @@ export class RaceServer {
 
   private clearTimers(lobby: Lobby): void {
     if (lobby.timer !== null) this.opts.scheduler.clearTimeout(lobby.timer);
-    if (lobby.deathTimer !== null) this.opts.scheduler.clearTimeout(lobby.deathTimer);
+    if (lobby.raceTimer !== null) this.opts.scheduler.clearTimeout(lobby.raceTimer);
     lobby.timer = null;
-    lobby.deathTimer = null;
+    lobby.raceTimer = null;
   }
 
   /** Drop lobbies idle for longer than idleLobbyMs. Call periodically. */
@@ -537,9 +573,15 @@ export class RaceServer {
       weapon: lobby.selected.weapon ?? "",
       keepsake: lobby.selected.keepsake ?? "",
       startAt: null,
+      entrants: lobby.players.map((p) => ({ id: p.id, name: p.name })),
       results: new Map(),
       progress: new Map(),
-      decided: false,
+      build: new Map(),
+      stats: new Map(),
+      winner: undefined,
+      reason: null,
+      decidedSent: false,
+      over: false,
     };
     lobby.phase = "countdown";
     const race = lobby.race;
@@ -561,14 +603,21 @@ export class RaceServer {
       race.startAt = this.opts.scheduler.now();
       lobby.phase = "racing";
       this.broadcastState(lobby);
+      lobby.raceTimer = this.opts.scheduler.setTimeout(() => {
+        lobby.raceTimer = null;
+        this.onTimeLimit(lobby, race);
+      }, this.opts.raceTimeLimitMs);
     }, this.opts.countdownMs);
   }
 
   private onProgress(s: Session, progress: Progress): void {
     const lobby = s.lobby;
     if (!lobby || lobby.phase !== "racing" || !lobby.race) return;
-    if (lobby.race.results.has(s.id)) return;
-    lobby.race.progress.set(s.id, progress);
+    const race = lobby.race;
+    if (race.results.has(s.id)) return;
+    race.progress.set(s.id, progress);
+    if (progress.build) race.build.set(s.id, progress.build);
+    if (progress.stats) race.stats.set(s.id, progress.stats);
     lobby.opponentOf(s)?.send({ type: "opponent_progress", ...progress });
   }
 
@@ -579,66 +628,115 @@ export class RaceServer {
     lobby.opponentOf(s)?.send({ type: "opponent_ghost", ...ghost });
   }
 
-  private onRunComplete(s: Session, victory: boolean, time: number): void {
+  /** Real time since the race start on the server's clock: the one official timer. */
+  private raceSeconds(race: RaceState): number | null {
+    if (race.startAt === null) return null;
+    return Math.round(this.opts.scheduler.now() - race.startAt) / 1000;
+  }
+
+  private onRunComplete(s: Session, victory: boolean, clientTime: number, stats?: RunStats, build?: BuildEntry[]): void {
     const lobby = s.lobby;
     const race = lobby?.race;
-    if (!lobby || !race || lobby.phase !== "racing") return this.error(s, "not_racing", "No race in progress");
+    if (!lobby || !race || lobby.phase !== "racing" || race.over) return this.error(s, "not_racing", "No race in progress");
     if (race.results.has(s.id)) return;
-    const serverTime = (this.opts.scheduler.now() - (race.startAt ?? this.opts.scheduler.now())) / 1000;
-    race.results.set(s.id, { victory, time, serverTime });
-    this.log(`lobby ${lobby.code} ${s.id} run_complete victory=${victory} time=${time} server=${serverTime}`);
-    const opp = lobby.opponentOf(s);
-    const oppResult = opp ? race.results.get(opp.id) : undefined;
-
-    if (victory) {
-      return this.finishRace(lobby, s, oppResult ? "survivor_finished" : "completed_first");
-    }
-    if (!opp || oppResult) {
-      // Both have now died.
-      return this.finishRace(lobby, null, "both_died");
-    }
-    opp.send({ type: "opponent_finished", victory: false, time });
-    lobby.deathTimer = this.opts.scheduler.setTimeout(() => {
-      lobby.deathTimer = null;
-      if (!race.decided) this.finishRace(lobby, null, "survivor_timeout");
-    }, this.opts.deathTimeoutMs);
+    this.record(lobby, s.id, { outcome: victory ? "cleared" : "died", victory, time: this.raceSeconds(race), clientTime, stats, build });
   }
 
-  private onForfeit(s: Session, reason: ResultReason): void {
+  /** Forfeit, leaving or a lost connection: a DNF, exactly like dying. */
+  private onForfeit(s: Session, outcome: "forfeit" | "disconnect", stats?: RunStats, build?: BuildEntry[]): void {
     const lobby = s.lobby;
-    if (!lobby || (lobby.phase !== "racing" && lobby.phase !== "countdown") || !lobby.race) {
+    const race = lobby?.race;
+    if (!lobby || !race || race.over || (lobby.phase !== "racing" && lobby.phase !== "countdown")) {
       return this.error(s, "not_racing", "No race in progress");
     }
-    const race = lobby.race;
-    if (race.results.has(s.id)) {
-      // Already dead or finished; forfeiting changes nothing.
-      return;
-    }
-    race.results.set(s.id, { victory: false, time: -1, serverTime: -1 });
-    const opp = lobby.opponentOf(s);
-    const oppResult = opp ? race.results.get(opp.id) : undefined;
-    if (!opp || (oppResult && !oppResult.victory)) return this.finishRace(lobby, null, "both_died");
-    this.finishRace(lobby, opp, reason);
+    if (race.results.has(s.id)) return; // already finished: nothing to give up
+    this.record(lobby, s.id, { outcome, victory: false, time: this.raceSeconds(race), clientTime: null, stats, build });
   }
 
-  private finishRace(lobby: Lobby, winner: Session | null, reason: ResultReason): void {
+  private onTimeLimit(lobby: Lobby, race: RaceState): void {
+    if (lobby.race !== race || race.over) return;
+    this.log(`lobby ${lobby.code} race ${race.race_id} hit the time limit`);
+    for (const e of race.entrants) {
+      if (!race.results.has(e.id)) {
+        race.results.set(e.id, { outcome: "timeout", victory: false, time: this.raceSeconds(race), clientTime: null });
+      }
+    }
+    this.settle(lobby);
+  }
+
+  private record(lobby: Lobby, id: string, r: RunResult): void {
+    const race = lobby.race!;
+    race.results.set(id, r);
+    if (r.build) race.build.set(id, r.build);
+    if (r.stats) race.stats.set(id, r.stats);
+    this.log(`lobby ${lobby.code} ${id} ${r.outcome} time=${r.time} client=${r.clientTime}`);
+    const s = lobby.players.find((p) => p.id === id);
+    if (s) lobby.opponentOf(s)?.send({ type: "opponent_finished", victory: r.victory, time: r.time, outcome: r.outcome });
+    this.settle(lobby);
+  }
+
+  /** First clear decides the winner; the race ends once every entrant has finished one way or another. */
+  private settle(lobby: Lobby): void {
     const race = lobby.race;
-    if (!race || race.decided) return;
-    race.decided = true;
+    if (!race || race.over) return;
+    const order = [...race.results.keys()];
+    if (race.winner === undefined) {
+      const first = order.find((id) => race.results.get(id)!.victory);
+      if (first !== undefined) {
+        const dnfBefore = order.slice(0, order.indexOf(first)).length > 0;
+        race.winner = first;
+        race.reason = dnfBefore ? "survivor_finished" : "completed_first";
+      } else if (race.entrants.every((e) => race.results.has(e.id))) {
+        race.winner = null;
+        race.reason = [...race.results.values()].some((r) => r.outcome === "timeout") ? "time_limit" : "no_finishers";
+      }
+    }
+    if (race.entrants.every((e) => race.results.has(e.id))) return this.finishRace(lobby);
+    if (race.winner !== undefined && !race.decidedSent) {
+      race.decidedSent = true;
+      this.log(`lobby ${lobby.code} race ${race.race_id} decided winner=${race.winner ?? "draw"} reason=${race.reason}`);
+      for (const p of lobby.players) p.send(this.decidedMessage(race, p));
+    }
+  }
+
+  private decidedMessage(race: RaceState, p: Session): ServerMessage {
+    const winner = race.entrants.find((e) => e.id === race.winner);
+    return {
+      type: "race_decided",
+      race_id: race.race_id,
+      winner: race.winner ?? null,
+      winner_name: winner?.name ?? null,
+      draw: race.winner === null,
+      you_won: race.winner === p.id,
+      reason: race.reason!,
+    };
+  }
+
+  private finishRace(lobby: Lobby): void {
+    const race = lobby.race;
+    if (!race || race.over) return;
+    race.over = true;
     this.clearTimers(lobby);
     lobby.phase = "finished";
     lobby.rematch.clear();
-    const results: RaceResultEntry[] = lobby.players.map((p) => {
-      const r = race.results.get(p.id);
+    const results: RaceResultEntry[] = race.entrants.map((e) => {
+      const r = race.results.get(e.id)!;
+      const prog = race.progress.get(e.id);
       return {
-        id: p.id,
-        name: p.name,
-        finished: r !== undefined,
-        victory: r?.victory ?? false,
-        time: r && r.time >= 0 ? r.time : null,
+        id: e.id,
+        name: e.name,
+        finished: true,
+        victory: r.victory,
+        outcome: r.outcome,
+        time: r.time,
+        depth: prog?.depth ?? null,
+        room: prog?.room ?? null,
+        build: race.build.get(e.id) ?? [],
+        stats: race.stats.get(e.id) ?? {},
       };
     });
-    this.log(`lobby ${lobby.code} race ${race.race_id} result winner=${winner?.id ?? "draw"} reason=${reason}`);
+    const winner = race.entrants.find((e) => e.id === race.winner);
+    this.log(`lobby ${lobby.code} race ${race.race_id} result winner=${winner?.id ?? "draw"} reason=${race.reason}`);
     this.broadcastState(lobby);
     for (const p of lobby.players) {
       p.send({
@@ -646,9 +744,9 @@ export class RaceServer {
         race_id: race.race_id,
         winner: winner?.id ?? null,
         winner_name: winner?.name ?? null,
-        draw: winner === null,
-        you_won: winner === p,
-        reason,
+        draw: winner === undefined,
+        you_won: race.winner === p.id,
+        reason: race.reason!,
         results,
       });
     }

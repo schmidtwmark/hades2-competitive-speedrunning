@@ -17,7 +17,7 @@ describe("tcp transport + mock clients", () => {
     const server = new RaceServer({
       voteSeconds: 2,
       countdownMs: 300,
-      deathTimeoutMs: 5000,
+      raceTimeLimitMs: 60_000,
       reconnectGraceMs: 1000,
       idleLobbyMs: 60_000,
       pools: { weapon: TEST_WEAPONS, keepsake: TEST_KEEPSAKES },

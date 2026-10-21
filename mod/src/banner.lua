@@ -72,22 +72,36 @@ function Banner:tick()
 		end
 	end
 
-	local result = c.state.result
-	if result and result ~= self.result_shown then
-		self.result_shown = result
-		self:announce(result)
+	-- One banner per race: when the winner is decided (possibly mid-run for the
+	-- other racer), or at the final result if nothing was decided before.
+	local decided, result = c.state.decided, c.state.result
+	local race_id = (decided and decided.race_id) or (result and result.race_id)
+	if (decided or result) and race_id ~= self.announced_race then
+		self.announced_race = race_id
+		self:announce(decided or result, result == nil)
 	end
 end
 
-function Banner:announce(r)
+-- What the banner says. still_running: the race is decided but not over,
+-- so the loser is told they can keep going.
+function Banner.texts(r, still_running, self_running)
+	local name = r.winner_name and tostring(r.winner_name):gsub('[{}@]', '') or nil
+	if r.draw then return 'DRAW', 'Neither racer finished' end
+	if r.you_won then return 'VICTORY', still_running and 'First to clear the run' or ((name or 'You') .. ' wins the race') end
+	if still_running and self_running then return 'DEFEAT', (name or 'Your rival') .. ' cleared first - finish for your time' end
+	return 'DEFEAT', (name or 'Your rival') .. ' wins the race'
+end
+
+function Banner:announce(r, still_running)
 	local G = self.G
-	local title = r.draw and 'DRAW' or (r.you_won and 'VICTORY' or 'DEFEAT')
+	local completed = self.client.state.race and self.client.state.race.completed
+	local title, subtitle = Banner.texts(r, still_running, not completed)
 	local win = r.you_won and not r.draw
 	self.stats.results = self.stats.results + 1
-	self.log('banner: result ' .. title)
+	self.log('banner: ' .. title .. ' / ' .. subtitle)
 	G.thread(G.DisplayInfoBanner, nil, {
 		Text = title,
-		SubtitleText = r.winner_name and not r.draw and (tostring(r.winner_name):gsub('[{}@]', '') .. ' wins the race') or ' ',
+		SubtitleText = subtitle,
 		Delay = 0.5, Duration = 4,
 		Layer = 'Overlay', FontScale = 1.0,
 		TextColor = { 254, 255, 255, 255 }, TextFadeColor = win and { 64, 230, 255, 255 } or { 235, 70, 60, 255 },

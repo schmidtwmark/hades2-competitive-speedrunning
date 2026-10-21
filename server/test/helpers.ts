@@ -64,7 +64,7 @@ export function makeServer(over: Partial<ServerOptions> = {}) {
   const server = new RaceServer({
     voteSeconds: 15,
     countdownMs: 3000,
-    deathTimeoutMs: 60_000,
+    raceTimeLimitMs: 3_600_000,
     reconnectGraceMs: 10_000,
     idleLobbyMs: 30 * 60_000,
     pools: { weapon: TEST_WEAPONS, keepsake: TEST_KEEPSAKES },

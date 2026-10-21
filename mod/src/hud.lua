@@ -26,8 +26,10 @@ local SHADOW = {
 	ShadowAlpha = 1.0, ShadowBlur = 1, ShadowOffset = { 0, 4 },
 }
 local GROUP = 'Combat_UI'
+local CLOCK_GROUP = 'Combat_Menu_TraitTray_Overlay' -- above menus: the clock never hides
 local MARGIN = 48         -- from the right edge
-local TOP = 36
+local CLOCK_Y = 34
+local TOP = 92            -- rival plate, under the race clock
 local BAR_SCALE = 0.32    -- HPBarFill is the player's bar, ~1050 px wide at 1.0
 local BAR_WIDTH = 1050 * BAR_SCALE
 local ICON_SCALE, ICON_STEP, ICONS_PER_ROW = 0.3, 44, 7
@@ -58,6 +60,11 @@ function Hud.depth_delta(mine, theirs)
 end
 
 -- Status line and colour for the opponent.
+local DNF_TEXT = { died = 'FALLEN', forfeit = 'FORFEITED', disconnect = 'DISCONNECTED', timeout = 'OUT OF TIME' }
+
+-- Status line for the rival. A rival who clears first has won, but you may
+-- keep going to post your time; a rival who drops out (dies, forfeits,
+-- disconnects) has not lost yet: you still have to finish.
 function Hud.status(st)
 	local r = st.result
 	if r then
@@ -66,8 +73,11 @@ function Hud.status(st)
 	end
 	local fin = st.opponent_finished
 	if fin then
-		if fin.victory then return 'CLEARED', GOLD end
-		return 'FALLEN - FINISH TO WIN', RED
+		if fin.victory then
+			if st.decided and not st.decided.you_won then return 'WON THE RACE - FINISH FOR YOUR TIME', GOLD end
+			return 'CLEARED', GOLD
+		end
+		return (DNF_TEXT[fin.outcome] or 'FALLEN') .. ' - FINISH TO WIN', RED
 	end
 	if st.opponent_connected == false then return 'DISCONNECTED', RED end
 	return 'RIVAL', GREY
@@ -222,7 +232,10 @@ function Hud:refresh(p)
 		self:set(p.delta, ' ')
 		self:set(p.hp_text, ' ')
 	end
-	self:set(p.times, Hud.clock_line(st, c:race_time()))
+	-- The clock itself is the separate race timer; this line is only for the
+	-- rival's final time once they are done.
+	local fin = st.opponent_finished
+	self:set(p.times, (fin and type(fin.time) == 'number') and Hud.clock_line(st, c:race_time()) or ' ')
 	self.stats.refreshes = self.stats.refreshes + 1
 end
 
@@ -236,12 +249,43 @@ function Hud:destroy()
 	self.G.MapState.RankedRaceHud = nil
 end
 
+function Hud:destroy_clock()
+	local ms = self.G.MapState
+	if ms and ms.RankedRaceClock then
+		pcall(self.G.Destroy, { Id = ms.RankedRaceClock })
+		ms.RankedRaceClock = nil
+	end
+end
+
+-- The one race timer: real time since the start (the server's clock is the
+-- official one), never paused for menus or boon choices, always on top.
+function Hud:update_clock()
+	local G, ms = self.G, self.G.MapState
+	local id = ms.RankedRaceClock
+	if not id then
+		id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = CLOCK_GROUP, X = (G.ScreenWidth or 1920) - MARGIN, Y = CLOCK_Y })
+		local a = text_args(id, 'NumericP22UndergroundSCHeavy', 36, 'Right', WHITE)
+		a.DataProperties = nil
+		G.CreateTextBox(a)
+		ms.RankedRaceClock = id
+		self.stats.clocks = (self.stats.clocks or 0) + 1
+	end
+	local now = self.now()
+	if now - (self.last_clock or 0) >= 0.05 then
+		self.last_clock = now
+		G.ModifyTextBox({ Id = id, Text = fmt_time(self.client:race_time()), AutoSetDataProperties = false })
+	end
+end
+
 function Hud:update()
 	if self.disabled or not self.G.MapState then return end
 	if not self:wanted() then
 		self:destroy()
+		self:destroy_clock()
 		return
 	end
+	local cok, cerr = pcall(self.update_clock, self)
+	if not cok then return self:fail('drawing the race clock', cerr) end
 	local p = self:plate()
 	if not p then
 		local ok, err = pcall(self.create, self)

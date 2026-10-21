@@ -19,8 +19,23 @@ local OPEN_PATCH_NOTES_SIG = '48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41
 local MAIN_MENU_UPDATE_SIG = '48 89 5C 24 18 48 89 74 24 20 55 57 41 54 41 56 41 57 48 8B EC 48 83 EC 60 0F 29 74 24 50 4D 8B'
 -- First 32 bytes of sgg::MenuScreen::ExitScreen() (unique): closes a menu screen.
 local MENU_EXIT_SCREEN_SIG = '40 53 48 83 EC 50 48 8B D9 33 C0 0F 57 C9 F3 0F 7F 4C 24 20 48 89 44 24 30 0F 10 89 10 02 00 00'
+-- Native saving that bypasses the game's Lua save gate: the pause menu's Undo
+-- Night and Quit (and a few script actions) call these C++ functions directly,
+-- so IllegalConversationModification and the RequestSave hook don't stop them.
+-- Callers ignore the SaveResult. Relative operands are wildcarded.
+local SAVE_PROFILE_SIG = '48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 1D ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? 41 0F B6 F0 0F B6 FA 48 8B E9'
+local SAVE_CHECKPOINT_SIG = '48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 D0 FD FF FF 48 81 EC 30 03 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4'
+-- sgg::PauseScreen: the "Undo Night" and "Quit" buttons' targets, and Resume
+-- (what Continue calls). Resume shares its prologue with another function, so
+-- its signature keeps the string offset (this build only; without it the
+-- pause menu just stays open until the player closes it).
+local PAUSE_GIVE_UP_SIG = '48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC C0 00 00 00 0F 29 70 C8 4C'
+local PAUSE_QUIT_SIG = '48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC 90 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 27 4C 8B E9 E8 ?? ??'
+local PAUSE_RESUME_SIG = '48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 40 48 8B F9 C6 44 24 20 00 C6 44 24 37 17 48 8D 2D B8 E3 35 00'
 local TEXT_ID = 'MainMenuScreen_CompetitiveSpeedrun'
 local LABEL = 'Play Competitive Speedrun'
+local FORFEIT_LABEL = 'Forfeit Race'
+local FORFEIT_HINT = 'end your run? your rival still has to finish to win'
 
 function Competitive.new(deps)
 	local c = setmetatable({}, Competitive)
@@ -60,13 +75,18 @@ local function patch_main_menu(text)
 	return text:sub(1, s_start - 1) .. moved .. text:sub(s_end + 1)
 end
 
--- ShellText.<lang>.sjson: add our string next to "Play".
+-- ShellText.<lang>.sjson: add our string next to "Play", and relabel the
+-- pause menu's "Undo Night" (it forfeits during a race; see install_pause_hooks).
 local function patch_shell_text(text)
 	if text:find(TEXT_ID, 1, true) then return nil end
 	local entry = '{\n      Id = "' .. TEXT_ID .. '"\n      DisplayName = "' .. LABEL .. '"\n    }\n    '
 	local at = text:find('{%s*Id%s*=%s*"MainMenuScreen_PlayGame"')
 	if not at then return nil end
-	return text:sub(1, at - 1) .. entry .. text:sub(at)
+	text = text:sub(1, at - 1) .. entry .. text:sub(at)
+	text = text:gsub('(Id%s*=%s*"PauseScreen_Abandon"%s*DisplayName%s*=%s*")[^"]*(")', '%1' .. FORFEIT_LABEL .. '%2', 1)
+	-- ...and its hint line under the menu (lower case, like the game's own).
+	text = text:gsub('(Id%s*=%s*"PauseScreen_GiveUp_ValidCheckpoint"%s*DisplayName%s*=%s*")[^"]*(")', '%1' .. FORFEIT_HINT .. '%2', 1)
+	return text
 end
 
 -- ScreenText.<lang>.sjson: in-world prompts (the Race Board's "{I} Race").
@@ -144,6 +164,80 @@ function Competitive:install_hook()
 	})
 	self.log('competitive: hooked OpenPatchNotes at ' .. tostring(ptr:get_address()))
 	return true
+end
+
+-- In competitive mode the in-memory profile must never reach the disk: skip
+-- the native save calls while active() is true.
+function Competitive:install_save_guard(active)
+	local _ = _ENV
+	local mem = self.rom.memory
+	if not (mem and mem.scan_pattern and mem.dynamic_hook) then return false end
+	local log, guarded = self.log, 0
+	for _, h in ipairs({
+		{ 'RankedRace_SaveProfile', SAVE_PROFILE_SIG, { 'uint64_t', 'bool', 'bool' }, 'ProfileManager::SaveProfile' },
+		{ 'RankedRace_SaveValidCheckpoint', SAVE_CHECKPOINT_SIG, { 'uint64_t', 'bool' }, 'ProgressManager::SaveValidCheckpoint' },
+	}) do
+		local name, sig, params, what = h[1], h[2], h[3], h[4]
+		local ptr = mem.scan_pattern(sig)
+		if ptr and not ptr:is_null() then
+			mem.dynamic_hook(name, 'int', params, ptr, {
+				function(ret)
+					local ok, on = pcall(active)
+					if not (ok and on) then return true end
+					log('competitive: blocked native ' .. what .. ' (the competitive profile is never saved)')
+					pcall(function() ret:set(0) end)
+					return false
+				end,
+				nil,
+			})
+			guarded = guarded + 1
+		else
+			log('competitive: ' .. what .. ' signature not found; that native save is not guarded')
+		end
+	end
+	self.log('competitive: native save guard on ' .. guarded .. '/2 functions')
+	return guarded == 2
+end
+
+-- Pause menu during a race: "Undo Night" (relabelled "Forfeit Race") and Quit
+-- open the mod's forfeit prompt instead of their normal action when
+-- h.give_up() / h.quit() say so; the pause menu is closed like Continue does.
+function Competitive:install_pause_hooks(h)
+	local _ = _ENV
+	local mem = self.rom.memory
+	if not (mem and mem.scan_pattern and mem.dynamic_hook and mem.dynamic_call) then return false end
+	local log, game = self.log, self.rom.game
+	local resume
+	local rptr = mem.scan_pattern(PAUSE_RESUME_SIG)
+	if rptr and not rptr:is_null() then
+		resume = game[mem.dynamic_call('void', { 'uint64_t' }, rptr)]
+	else
+		log('competitive: PauseScreen::Resume signature not found; the pause menu stays open after Forfeit')
+	end
+	local hooked = 0
+	for _, b in ipairs({ { 'RankedRace_PauseGiveUp', PAUSE_GIVE_UP_SIG, 'Undo Night', h.give_up },
+		{ 'RankedRace_PauseQuit', PAUSE_QUIT_SIG, 'Quit', h.quit } }) do
+		local name, sig, what, take = b[1], b[2], b[3], b[4]
+		local ptr = mem.scan_pattern(sig)
+		if ptr and not ptr:is_null() then
+			mem.dynamic_hook(name, 'void', { 'uint64_t' }, ptr, {
+				function(_, screen)
+					local ok, yes = pcall(take)
+					if not (ok and yes) then return true end
+					log('competitive: pause menu ' .. what .. ' -> forfeit prompt')
+					local rok, rerr = pcall(h.forfeit_prompt)
+					if not rok then log('competitive: forfeit prompt failed: ' .. tostring(rerr)) end
+					if resume then pcall(resume, screen:get()) end
+					return false
+				end,
+				nil,
+			})
+			hooked = hooked + 1
+		else
+			log('competitive: PauseScreen ' .. what .. ' signature not found; not hooked')
+		end
+	end
+	return hooked == 2
 end
 
 function Competitive:install()

@@ -19,6 +19,9 @@ export interface BuildEntry {
   level?: number;
 }
 
+/** Per-run numbers for the results screen (damage dealt/taken, kills, ...). Opaque to the server. */
+export type RunStats = Record<string, number>;
+
 export interface Progress {
   room: string;
   biome?: string;
@@ -29,6 +32,7 @@ export interface Progress {
   alive: boolean;
   /** Present only when the build changed since the last update. */
   build?: BuildEntry[];
+  stats?: RunStats;
 }
 
 /** High-rate position snapshot for the opponent's shadow (never stored). */
@@ -54,9 +58,10 @@ export type ClientMessage =
   | { type: "vote_keepsake"; keepsake: string }
   | { type: "ready" }
   | ({ type: "progress_update" } & Progress)
-  | { type: "run_complete"; time: number; victory: boolean }
+  | { type: "run_complete"; time: number; victory: boolean; stats?: RunStats; build?: BuildEntry[] }
   | ({ type: "ghost" } & Ghost)
-  | { type: "forfeit" }
+  /** Give up the run: a DNF, exactly like dying (the rival still has to finish to win). */
+  | { type: "forfeit"; stats?: RunStats; build?: BuildEntry[] }
   | { type: "rematch" }
   | { type: "ping"; t?: number };
 
@@ -69,13 +74,19 @@ export type LobbyPhase =
   | "racing"
   | "finished";
 
+/**
+ * Why the race went the way it did. The first racer to clear wins; a racer who
+ * dies, forfeits or disconnects is a DNF and the other must still clear to win;
+ * no clears at all is a draw.
+ */
 export type ResultReason =
   | "completed_first"
   | "survivor_finished"
-  | "both_died"
-  | "survivor_timeout"
-  | "forfeit"
-  | "disconnect";
+  | "no_finishers"
+  | "time_limit";
+
+/** How one racer's run ended. */
+export type Outcome = "cleared" | "died" | "forfeit" | "disconnect" | "timeout";
 
 export interface PlayerSummary {
   id: string;
@@ -89,7 +100,13 @@ export interface RaceResultEntry {
   name: string;
   finished: boolean;
   victory: boolean;
+  outcome: Outcome;
+  /** Official real time from the race start (server clock), seconds; null for a DNF without a time. */
   time: number | null;
+  depth: number | null;
+  room: string | null;
+  build: BuildEntry[];
+  stats: RunStats;
 }
 
 export interface RaceSetup {
@@ -120,7 +137,9 @@ export type ServerMessage =
   | ({ type: "race_start"; countdown: number; countdown_ms: number } & RaceSetup)
   | ({ type: "opponent_progress" } & Progress)
   | ({ type: "opponent_ghost" } & Ghost)
-  | { type: "opponent_finished"; victory: boolean; time: number }
+  | { type: "opponent_finished"; victory: boolean; time: number | null; outcome: Outcome }
+  /** The winner is known while someone is still running (they may finish their run); race_result follows. */
+  | { type: "race_decided"; race_id: number; winner: string | null; winner_name: string | null; draw: boolean; you_won: boolean; reason: ResultReason }
   | { type: "opponent_disconnected"; grace: number }
   | { type: "opponent_reconnected" }
   | {
@@ -190,6 +209,22 @@ function optBuild(o: Record<string, unknown>): BuildEntry[] | undefined {
   });
 }
 
+function optStats(o: Record<string, unknown>): RunStats | undefined {
+  const v = o.stats;
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) throw new ProtocolError("bad_field", "field 'stats' must be an object");
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length > 32) throw new ProtocolError("bad_field", "field 'stats' has too many entries (max 32)");
+  const out: RunStats = {};
+  for (const [k, n] of entries) {
+    if (k.length > 40 || typeof n !== "number" || !Number.isFinite(n)) {
+      throw new ProtocolError("bad_field", "stats must map short names to finite numbers");
+    }
+    out[k] = n;
+  }
+  return out;
+}
+
 /** Parse and validate one decoded JSON value into a ClientMessage. */
 export function parseClientMessage(raw: unknown): ClientMessage {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -205,9 +240,10 @@ export function parseClientMessage(raw: unknown): ClientMessage {
     case "cancel_match":
     case "leave_lobby":
     case "ready":
-    case "forfeit":
     case "rematch":
       return { type };
+    case "forfeit":
+      return { type, stats: optStats(o), build: optBuild(o) };
     case "join_lobby":
       return { type, code: str(o, "code", 16).toUpperCase(), ...(o.create === true ? { create: true } : {}) };
     case "vote_weapon":
@@ -225,6 +261,7 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         time: num(o, "time"),
         alive: bool(o, "alive"),
         build: optBuild(o),
+        stats: optStats(o),
       };
     case "ghost":
       return {
@@ -238,7 +275,7 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         t: num(o, "t"),
       };
     case "run_complete":
-      return { type, time: num(o, "time"), victory: bool(o, "victory") };
+      return { type, time: num(o, "time"), victory: bool(o, "victory"), stats: optStats(o), build: optBuild(o) };
     case "ping":
       return { type, t: optNum(o, "t") };
     default:

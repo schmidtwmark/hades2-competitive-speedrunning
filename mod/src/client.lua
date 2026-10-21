@@ -166,7 +166,14 @@ end
 
 function Client:ready() return self:send({ type = 'ready' }) end
 
-function Client:forfeit() return self:send({ type = 'forfeit' }) end
+-- Give up the current run: a DNF exactly like dying (the rival still has to
+-- finish to win). Stats/build ride along for the results screen.
+function Client:forfeit(stats, build)
+	local r = self.state.race
+	if not r or self.state.result or r.completed then return false end
+	r.completed = { victory = false, forfeit = true, time = self:race_time() }
+	return self:send({ type = 'forfeit', stats = stats, build = build })
+end
 
 function Client:rematch()
 	self.state.rematch_requested = true
@@ -195,6 +202,7 @@ function Client:_flush_progress(now)
 	local msg = {
 		type = 'progress_update', room = p.room, biome = p.biome, depth = p.depth,
 		hp = p.hp, max_hp = p.max_hp, time = p.time or self:race_time(), alive = p.alive ~= false,
+		stats = p.stats,
 	}
 	-- The build only travels when it changed.
 	if p.build then
@@ -217,11 +225,12 @@ function Client:report_ghost(g)
 		t = self:race_time() })
 end
 
-function Client:report_complete(victory, time)
+function Client:report_complete(victory, time, stats, build)
 	if not self:racing() or self.state.race.completed then return false end
 	self:_flush_progress(self.now())
 	self.state.race.completed = { victory = victory, time = time or self:race_time() }
-	return self:send({ type = 'run_complete', victory = victory and true or false, time = self.state.race.completed.time })
+	return self:send({ type = 'run_complete', victory = victory and true or false, time = self.state.race.completed.time,
+		stats = stats, build = build })
 end
 
 -- queries -----------------------------------------------------------------------
@@ -361,6 +370,7 @@ function handlers.race_start(c, m)
 	c.state.ghost = nil
 	c.last_build_key = nil
 	c.state.opponent_finished = nil
+	c.state.decided = nil
 	c.state.rematch_requested = nil
 	c.pending_progress = nil
 	m.countdown_end = c.now() + (m.countdown_ms or 0) / 1000
@@ -395,6 +405,14 @@ end
 
 function handlers.opponent_reconnected(c)
 	c.state.opponent_connected = true
+end
+
+-- The winner is known but someone is still running (maybe us): keep racing.
+function handlers.race_decided(c, m)
+	c.state.decided = m
+	c.log(string.format('race_decided winner=%s reason=%s you_won=%s', tostring(m.winner_name), tostring(m.reason),
+		tostring(m.you_won)))
+	c:_emit('race_decided', m)
 end
 
 function handlers.race_result(c, m)

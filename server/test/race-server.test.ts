@@ -252,39 +252,55 @@ describe("race", () => {
     assert.equal(b.all("opponent_progress").length, 0);
   });
 
-  it("first victory wins", () => {
-    const { a, b } = racing();
-    a.send({ type: "run_complete", victory: true, time: 300 });
+  it("first clear decides at once; the other keeps racing and their finish ends the race", () => {
+    const { a, b, scheduler } = racing();
+    scheduler.advance(300_000);
+    a.send({ type: "run_complete", victory: true, time: 299.9 });
     for (const c of [a, b]) {
-      const r = c.last("race_result");
-      assert.equal(r.reason, "completed_first");
-      assert.equal(r.winner_name, "Alice");
-      assert.equal(r.draw, false);
-      assert.equal(c.state().phase, "finished");
+      const d = c.last("race_decided");
+      assert.equal(d.reason, "completed_first");
+      assert.equal(d.winner_name, "Alice");
+      assert.equal(c.all("race_result").length, 0);
+      assert.equal(c.state().phase, "racing");
     }
-    assert.equal(a.last("race_result").you_won, true);
+    assert.equal(a.last("race_decided").you_won, true);
+    assert.equal(b.last("race_decided").you_won, false);
+    assert.equal(b.last("opponent_finished").outcome, "cleared");
+    // Bob keeps going and posts his own time.
+    b.send({ type: "progress_update", room: "R", depth: 9, hp: 1, time: 1, alive: true });
+    assert.equal(a.last("opponent_progress").depth, 9);
+    scheduler.advance(30_000);
+    b.send({ type: "run_complete", victory: true, time: 330 });
+    const r = a.last("race_result");
+    assert.equal(r.reason, "completed_first");
+    assert.equal(r.winner_name, "Alice");
+    assert.deepEqual(r.results.map((x) => [x.name, x.outcome, x.time]), [["Alice", "cleared", 300], ["Bob", "cleared", 330]]);
     assert.equal(b.last("race_result").you_won, false);
-    b.send({ type: "run_complete", victory: true, time: 310 });
-    assert.equal(b.all("race_result").length, 1);
-    assert.equal(b.last("error").code, "not_racing");
+    assert.equal(a.state().phase, "finished");
+    assert.equal(b.all("race_decided").length, 1);
   });
 
-  it("death: survivor must finish to win", () => {
-    const { a, b } = racing();
+  it("the official time is the server clock, not the client's number", () => {
+    const { a, b, scheduler } = racing();
+    scheduler.advance(61_234);
+    b.send({ type: "run_complete", victory: false, time: 5 });
+    scheduler.advance(10_000);
+    a.send({ type: "run_complete", victory: true, time: 9999 });
+    assert.deepEqual(a.last("race_result").results.map((x) => x.time), [71.234, 61.234]);
+  });
+
+  it("opponent dies: the survivor must still clear to win, with no time pressure", () => {
+    const { a, b, scheduler } = racing();
     a.send({ type: "run_complete", victory: false, time: 100 });
-    assert.equal(a.all("race_result").length, 0);
-    assert.equal(b.last("opponent_finished").victory, false);
+    assert.equal(b.last("opponent_finished").outcome, "died");
+    assert.equal(b.all("race_decided").length, 0);
+    scheduler.advance(60 * 60 * 1000 - 1);
+    assert.equal(b.all("race_result").length, 0);
     b.send({ type: "run_complete", victory: true, time: 400 });
     const r = a.last("race_result");
     assert.equal(r.reason, "survivor_finished");
     assert.equal(r.winner_name, "Bob");
-    assert.deepEqual(
-      r.results.map((x) => [x.name, x.victory, x.time]),
-      [
-        ["Alice", false, 100],
-        ["Bob", true, 400],
-      ],
-    );
+    assert.deepEqual(r.results.map((x) => [x.name, x.victory, x.outcome]), [["Alice", false, "died"], ["Bob", true, "cleared"]]);
   });
 
   it("both die -> draw", () => {
@@ -293,44 +309,80 @@ describe("race", () => {
     b.send({ type: "run_complete", victory: false, time: 200 });
     const r = b.last("race_result");
     assert.equal(r.draw, true);
-    assert.equal(r.reason, "both_died");
+    assert.equal(r.reason, "no_finishers");
     assert.equal(r.winner, null);
   });
 
-  it("survivor timeout -> draw", () => {
+  it("forfeit is a DNF like dying: the rival still has to finish", () => {
+    const { a, b } = racing();
+    b.send({ type: "forfeit", stats: { DamageDealt: 1200 } });
+    assert.equal(a.last("opponent_finished").outcome, "forfeit");
+    assert.equal(a.all("race_result").length, 0);
+    a.send({ type: "run_complete", victory: true, time: 500 });
+    const r = a.last("race_result");
+    assert.equal(r.reason, "survivor_finished");
+    assert.equal(r.you_won, true);
+    assert.equal(r.results[1]?.outcome, "forfeit");
+    assert.equal(r.results[1]?.stats.DamageDealt, 1200);
+  });
+
+  it("forfeit after the rival cleared ends the race; after the rival died it is a draw", () => {
+    const one = racing();
+    one.a.send({ type: "run_complete", victory: true, time: 10 });
+    one.b.send({ type: "forfeit" });
+    assert.equal(one.b.last("race_result").winner_name, "Alice");
+    assert.equal(one.b.last("race_result").reason, "completed_first");
+    const two = racing();
+    two.a.send({ type: "run_complete", victory: false, time: 50 });
+    two.b.send({ type: "forfeit" });
+    assert.equal(two.a.last("race_result").draw, true);
+    assert.equal(two.a.last("race_result").reason, "no_finishers");
+  });
+
+  it("time limit: anyone still running is a DNF", () => {
     const { a, b, scheduler } = racing();
-    a.send({ type: "run_complete", victory: false, time: 100 });
-    scheduler.advance(59_999);
-    assert.equal(b.all("race_result").length, 0);
-    scheduler.advance(1);
-    assert.equal(b.last("race_result").reason, "survivor_timeout");
-    assert.equal(b.last("race_result").draw, true);
+    a.send({ type: "run_complete", victory: true, time: 10 });
+    scheduler.advance(3_600_000);
+    const r = b.last("race_result");
+    assert.equal(r.winner_name, "Alice");
+    assert.equal(r.results[1]?.outcome, "timeout");
+    const other = racing();
+    other.scheduler.advance(3_600_000);
+    assert.equal(other.a.last("race_result").reason, "time_limit");
+    assert.equal(other.a.last("race_result").draw, true);
   });
 
-  it("forfeit hands the win to the opponent", () => {
+  it("results carry each racer's last build, depth and stats", () => {
     const { a, b } = racing();
-    b.send({ type: "forfeit" });
-    assert.equal(a.last("race_result").reason, "forfeit");
-    assert.equal(a.last("race_result").you_won, true);
+    a.send({ ...progress, depth: 7, build: [{ name: "ZeusWeaponBoon", rarity: "Epic" }], stats: { Kills: 40 } });
+    a.send({ ...progress, depth: 8 });
+    b.send({ type: "run_complete", victory: false, time: 1, build: [{ name: "AresWeaponBoon" }], stats: { Kills: 3 } });
+    a.send({ type: "run_complete", victory: true, time: 2, stats: { Kills: 55, DamageTaken: 120 } });
+    const [ra, rb] = b.last("race_result").results;
+    assert.equal(ra?.depth, 8);
+    assert.equal(ra?.build[0]?.name, "ZeusWeaponBoon");
+    assert.deepEqual(ra?.stats, { Kills: 55, DamageTaken: 120 });
+    assert.equal(rb?.build[0]?.name, "AresWeaponBoon");
+    a.send({ ...progress, stats: { Kills: "many" } });
+    assert.equal(a.last("error").code, "bad_field");
   });
 
-  it("forfeit after the opponent died is a draw", () => {
-    const { a, b } = racing();
-    a.send({ type: "run_complete", victory: false, time: 50 });
-    b.send({ type: "forfeit" });
-    assert.equal(a.last("race_result").draw, true);
-  });
-
-  it("leaving mid-race forfeits", () => {
+  it("leaving mid-race is a DNF; the one who stays races on to the result", () => {
     const { a, b } = racing();
     b.send({ type: "leave_lobby" });
-    assert.equal(a.last("race_result").reason, "forfeit");
-    assert.equal(a.state().phase, "waiting");
+    assert.equal(a.last("opponent_finished").outcome, "forfeit");
+    assert.equal(a.state().phase, "racing");
+    a.send({ type: "run_complete", victory: true, time: 9 });
+    const r = a.last("race_result");
+    assert.equal(r.reason, "survivor_finished");
+    assert.deepEqual(r.results.map((x) => x.name), ["Alice", "Bob"]);
+    assert.equal(a.state().phase, "finished");
   });
 
   it("rematch after both agree starts a fresh vote", () => {
     const { a, b } = racing();
     a.send({ type: "run_complete", victory: true, time: 300 });
+    b.send({ type: "forfeit" });
     a.clear();
     a.send({ type: "rematch" });
     assert.equal(a.all("vote_phase").length, 0);
@@ -343,6 +395,7 @@ describe("race", () => {
     const { a, b, scheduler } = racing();
     assert.equal(a.last("race_start").race_id, 1);
     a.send({ type: "run_complete", victory: true, time: 1 });
+    b.send({ type: "run_complete", victory: false, time: 2 });
     a.send({ type: "rematch" });
     b.send({ type: "rematch" });
     for (const c of [a, b]) c.send({ type: "vote_weapon", weapon: "WeaponAxe" });
@@ -370,17 +423,31 @@ describe("disconnects", () => {
     scheduler.advance(10_000);
     assert.equal(b.all("race_result").length, 0);
     a2.send({ type: "run_complete", victory: true, time: 99 });
-    assert.equal(b.last("race_result").winner_name, "Alice");
+    assert.equal(b.last("race_decided").winner_name, "Alice");
   });
 
-  it("grace expiry mid-race forfeits", () => {
+  it("grace expiry mid-race is a DNF; the rival still has to finish", () => {
     const { a, b, scheduler } = racing();
     a.conn.close();
     scheduler.advance(10_000);
-    const r = b.last("race_result");
-    assert.equal(r.reason, "disconnect");
-    assert.equal(r.you_won, true);
+    assert.equal(b.last("opponent_finished").outcome, "disconnect");
     assert.equal(b.state().players.length, 1);
+    b.send({ type: "run_complete", victory: true, time: 99 });
+    const r = b.last("race_result");
+    assert.equal(r.reason, "survivor_finished");
+    assert.equal(r.you_won, true);
+  });
+
+  it("a racer who reconnects after the race was decided is told again", () => {
+    const { server, a, b } = racing();
+    const token = b.last("welcome").token;
+    a.send({ type: "run_complete", victory: true, time: 5 });
+    b.conn.close();
+    const b2 = new TestClient(server, "Bob");
+    b2.hello(token);
+    assert.equal(b2.last("race_decided").winner_name, "Alice");
+    assert.equal(b2.last("opponent_finished").outcome, "cleared");
+    assert.equal(b2.state().phase, "racing");
   });
 
   it("a stale socket closing after a resume does not drop the session", () => {

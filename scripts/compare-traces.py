@@ -38,11 +38,16 @@ for i in range(max(len(ra), len(rb))):
     if i >= n:
         print(f"room {i+1}: only one side reached it ({x.get('name') or y.get('name')})")
         continue
-    diffs = [f for f in strict if x.get(f) != y.get(f)]
+    # A racer who ended the run inside this room (cleared/forfeited mid-fight)
+    # only saw part of its spawn order: compare everything else.
+    unfinished = (i == len(ra) - 1 and not x.get("taken")) or (i == len(rb) - 1 and not y.get("taken"))
+    fields = [f for f in strict if not (unfinished and f == "spawns")]
+    diffs = [f for f in fields if x.get(f) != y.get(f)]
     if diffs:
         same = False
     mark = "same" if not diffs else "DIFF " + ",".join(diffs)
-    print(f"room {i+1}: {x.get('name')} flip={x.get('flipped')} {x.get('encounter')} [{mark}]")
+    print(f"room {i+1}: {x.get('name')} flip={x.get('flipped')} {x.get('encounter')} [{mark}]"
+          + (" (a racer ended the run here; spawn order not compared)" if unfinished else ""))
     if "enemies" in diffs:
         print(f"   A enemies: {x.get('enemies')}\n   B enemies: {y.get('enemies')}")
     da = [(d.get('room'), d.get('reward'), d.get('loot')) for d in x.get("doors") or []]

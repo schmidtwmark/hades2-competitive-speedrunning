@@ -10,7 +10,9 @@
 --   code_file     host writes the lobby code here, joiner polls it
 --   weapon, keepsake  what to vote for (default: first option)
 --   rooms         room transitions to drive before the outcome (default 2)
---   outcome       "win" | "die" | "none"
+--   outcome       "win" | "die" | "forfeit" (pause-menu path: prompt, then Forfeit) | "none"
+--   clear_screen  win through the game's run clear screen (then home, like a player)
+--                 outcome "external": the test ends the run itself (e.g. a gamepad); just check the result
 --   timeout       seconds before giving up (default 600)
 --   trace_file    where to write the per-room trace (optional)
 --   quit_after    exit the game this many seconds after the result (optional)
@@ -180,6 +182,7 @@ function Bot:update()
 	local c, st = self.client, self.client.state
 	if self.step == 'idle' then return end
 	if self.game.bot_advance_dialogue then self.game:bot_advance_dialogue() end
+	if self.game.bot_wake_death_loop and self.cfg.role ~= 'pad' then self.game:bot_wake_death_loop() end
 	if self.step == 'connect' or self.step == 'wait_game' then self:reset_to_hub(now) end
 	self:pump_presses(now)
 	local handler = self['step_' .. self.step]
@@ -366,10 +369,21 @@ function Bot:step_play(now, c, st)
 		local outcome = self.cfg.outcome or 'none'
 		if outcome == 'die' then
 			self.game:bot_kill_hero()
+		elseif outcome == 'forfeit' then
+			-- What "Forfeit Race" in the pause menu does, then the prompt's Forfeit.
+			self:check('forfeit prompt offered', self.game:request_forfeit())
+			if self.cfg.use_board then
+				self:queue_press('forfeit')
+			else
+				self.game:forfeit_now()
+			end
 		elseif outcome == 'win' and not self.cfg.win_after_opponent_death then
 			self.game:bot_win()
 		end
-		if outcome == 'none' then self:go_step('result') end
+		if outcome == 'none' or outcome == 'external' then
+			self.log('bot: rooms done; outcome ' .. outcome)
+			self:go_step('result')
+		end
 	end
 	-- Scenario: finish only once the server told us the opponent died.
 	if self.cfg.win_after_opponent_death and not self.won and st.opponent_finished then
@@ -394,10 +408,21 @@ function Bot:step_result(now, c, st)
 	local outcome = self.cfg.outcome or 'none'
 	if outcome == 'none' then return self:finish(true, 'rooms driven, no outcome requested') end
 	if not st.result then
-		if now - self.step_started > 120 then self:finish(false, 'no race_result') end
+		local wait = outcome == 'external' and 300 or 120
+		if now - self.step_started > wait then self:finish(false, 'no race_result') end
 		return
 	end
 	local r = st.result
+	-- On the board, the race ends on the results screen once the racer is home.
+	if self.cfg.expect_results_screen then
+		local b = self.board
+		local shown = b and b.rendered and tostring(b.rendered):find('^finished') ~= nil
+		if not shown and now - (self.result_seen or now) < 60 then
+			self.result_seen = self.result_seen or now
+			return
+		end
+		self:check('results screen shown', shown, b and tostring(b.rendered))
+	end
 	if self.cfg.expect then
 		local got = r.draw and 'draw' or (r.you_won and 'win' or 'lose')
 		self:check('expected result', got == self.cfg.expect, string.format('got=%s reason=%s', got, tostring(r.reason)))

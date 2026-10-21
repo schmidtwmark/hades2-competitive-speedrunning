@@ -8,6 +8,9 @@
 # Script: home -> A (Find Match, focused) ; weapon vote -> Right Right A
 # (third weapon: proves D-pad navigation) ; keepsake vote -> Down A ;
 # ready check -> A. Logs: local/runs/<stamp>-pad/. Prints RESULT: PASS|FAIL.
+# PAD_SCENARIO=forfeit: after the rooms, Start -> Down Down A ("Forfeit Race"
+# in the native pause menu) -> Up A (the prompt's Forfeit); the rival then
+# finishes and wins.
 #   scripts/e2e-pad.sh [rooms]
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,10 +52,13 @@ PIDS+=($!)
 for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
 "$ROOT/scripts/bazzite/push.sh" >/dev/null || fail "push"
 
+SCEN="${PAD_SCENARIO:-win}"
+OUTCOME='"outcome":"win","clear_screen":true,"expect":"win","expect_reason":"completed_first"'
+[ "$SCEN" = forfeit ] && OUTCOME='"outcome":"external","expect":"lose","expect_reason":"survivor_finished"'
 cat >"$RUN/bot.json" <<JSON
 {"role":"pad","name":"PadPlayer","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
- "outcome":"win","expect":"win","expect_reason":"completed_first","timeout":$((TIMEOUT - 60)),"quit_after":5,
- "press_competitive_after":3,"expect_competitive":true,"reset_to_hub":false}
+ $OUTCOME,"timeout":$((TIMEOUT - 60)),"quit_after":${QUIT_AFTER:-5},
+ "press_competitive_after":3,"expect_competitive":true,"reset_to_hub":false,"expect_results_screen":true}
 JSON
 ssh "$HOST" "mkdir -p '$DATA' '$TB/run' && rm -f '$DATA/bot-result.txt' '$DATA/trace.json' '$DATA/ranked.log' && cat > '$DATA/bot.json'" <"$RUN/bot.json" || fail "bot.json"
 
@@ -83,6 +89,20 @@ pad down a
 wait_page "ready:false"
 pad a
 
+if [ "$SCEN" = forfeit ]; then
+  t0=$(date +%s)
+  until ssh "$HOST" "grep -q 'bot: rooms done' '$DATA/ranked.log' 2>/dev/null"; do
+    [ $(( $(date +%s) - t0 )) -gt 300 ] && fail "rooms never finished"
+    sleep 2
+  done
+  sleep 2
+  pad start            # native pause menu, cursor on Continue
+  sleep 1.5
+  pad down down a      # Options, then "Forfeit Race"
+  wait_page "prompt:forfeit" 30
+  pad up a             # the prompt focuses Keep Racing; Forfeit is above it
+fi
+
 start=$(date +%s)
 while :; do
   ssh "$HOST" "test -s '$DATA/bot-result.txt'" && break
@@ -91,18 +111,30 @@ while :; do
   sleep 5
 done
 sleep 3
+# QUIT_AFTER: the game lingers on its result screens (recordings); let it close itself.
+if [ -n "${QUIT_AFTER:-}" ]; then
+  for _ in $(seq $(( QUIT_AFTER + 30 ))); do
+    ssh "$HOST" "$TB/instance.sh status A" | grep -q ': active' || break
+    sleep 1
+  done
+fi
 for f in bot-result.txt trace.json ranked.log; do scp -q "$HOST:$DATA/$f" "$RUN/$f" 2>/dev/null; done
 scp -q "$HOST:$TB/run/pad.out" "$RUN/pad.out" 2>/dev/null
 wait "$MOCK" 2>/dev/null
 
-echo "--- board actions seen in game"
-grep -E 'board: (find|vote|ready|page)' "$RUN/ranked.log" | sed 's/^[0-9.]* //'
+echo "--- board and pause actions seen in game"
+grep -E 'board: (find|vote|ready|page|forfeit|prompt)|pause menu|forfeiting|blocked native' "$RUN/ranked.log" | sed 's/^[0-9.]* //'
 VOTE=$(grep -oE 'board: vote [A-Za-z]+' "$RUN/ranked.log" | head -1 | awk '{print $3}')
 echo "--- game bot"
 cat "$RUN/bot-result.txt" 2>/dev/null || echo "(no bot-result.txt)"
 NAV_OK=0; [ "$VOTE" = WeaponTorch ] && NAV_OK=1
 echo "--- D-pad navigation: weapon vote $VOTE (want WeaponTorch): $([ $NAV_OK = 1 ] && echo ok || echo WRONG)"
-if grep -q '^RESULT: PASS' "$RUN/bot-result.txt" 2>/dev/null && [ $NAV_OK = 1 ]; then
+PAUSE_OK=1
+if [ "$SCEN" = forfeit ]; then
+  grep -q 'pause menu Undo Night -> forfeit prompt' "$RUN/ranked.log" && grep -q 'game: forfeiting the race' "$RUN/ranked.log" || PAUSE_OK=0
+  echo "--- forfeit through the native pause menu: $([ $PAUSE_OK = 1 ] && echo ok || echo MISSING)"
+fi
+if grep -q '^RESULT: PASS' "$RUN/bot-result.txt" 2>/dev/null && [ $NAV_OK = 1 ] && [ $PAUSE_OK = 1 ]; then
   echo "RESULT: PASS (controller-driven race)"
 else
   echo "--- ranked.log tail"; tail -25 "$RUN/ranked.log" 2>/dev/null

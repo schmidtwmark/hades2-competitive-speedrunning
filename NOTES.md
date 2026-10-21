@@ -148,6 +148,36 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   mode, so the board re-places the cursor on its focus when `UseMouse` turns false, and
   it only auto-opens once `IsInputAllowed` (the hub arrival blocks input for seconds).
 
+## Race rules, forfeit, timer, results (verified in game)
+
+- **Rules (server):** first clear decides the winner (`race_decided` goes to both while the
+  other may still be running); dying, forfeiting and disconnecting are DNFs, so the other
+  racer must still clear to win; no clears = draw (`no_finishers`); a 3 h cap turns anyone
+  still running into `timeout`. The race ends (`race_result`, with each racer's outcome,
+  official time, depth, build and stats) once every entrant has finished one way or another.
+  Official times are the server clock from the race start.
+- **One timer:** the game's own run timer (native `InGameUI`, "Timer Display" setting) shows
+  `CurrentRun.GameplayTime`, which stops for menus, boon choices and room transitions. In
+  competitive mode it is hidden (`BlockGameplayTimer`) and the mod draws one real-time race
+  clock at the top right, above menus. The run clear screen shows the race time too
+  (`GameplayTime` is set to it in the `RecordRunCleared` hook).
+- **Forfeit:** the native pause menu's "Undo Night" (`sgg::PauseScreen::GiveUpToMainMenu`) is
+  hooked and relabelled "Forfeit Race"; Quit mid-race (`QuitToMainMenu`) is hooked too. Both
+  close the pause menu (`PauseScreen::Resume`) and open the board's prompt (Keep Racing
+  focused). Verified with real controller input (`PAD_SCENARIO=forfeit scripts/e2e-pad.sh`).
+- **Save guard:** those pause actions call native `ProfileManager::SaveProfile` /
+  `ProgressManager::SaveValidCheckpoint`, which the Lua `IllegalConversationModification`
+  gate does not cover; both are hooked and skipped while competitive mode is active.
+- **Back home:** after a clear (clear screen closed), a forfeit or a death in a competitive
+  race the mod loads Hub_PreRun directly (walk-in points 40009 -> 40012) instead of the death
+  sequence, which plays story scenes in Hub_Main and waits for input.
+- **Results screen:** the board's finished page compares both racers like the run clear screen
+  (result + time, depth, damage dealt/taken, foes slain, healing, gold, chambers, death
+  defiances, boons, hammers; better value in gold; both boon lists). Stats come from
+  `CurrentRun` (see `Game:run_stats`).
+- **Recordings:** `scripts/record.sh NAME WINDOWS -- <test command>` records the game windows
+  on the test PC (x11grab + VAAPI, wall-clock timestamps) and builds `local/videos/NAME.mp4`.
+
 ## Public server (Railway)
 
 Project `hades2-ranked-race`, service `race-server`, built from `server/Dockerfile`, listening on `::7777`

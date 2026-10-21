@@ -28,7 +28,7 @@ local KEEPSAKE_LEVEL = 3
 local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', 'StartRoom', 'KillHero', 'RecordRunCleared',
 	'EquipKeepsake', 'DoUnlockRoomExits', 'StartNewGame', 'RequestSave', 'DeathAreaSwitchRoom', 'ValidateCheckpoint',
 	'InvalidateCheckpoint', 'LeaveRoom', 'RandomSetNextInitSeed', 'ChooseEncounter', 'RunShopGeneration', 'ChooseNextRoomData',
-	'CreateRoom', 'ChooseRoomReward', 'GetNextSpawn', 'HandleNextSpawn', 'Load' }
+	'CreateRoom', 'ChooseRoomReward', 'GetNextSpawn', 'HandleNextSpawn', 'Load', 'CloseRunClearScreen' }
 
 function Game.new(deps)
 	local g = setmetatable({}, Game)
@@ -493,26 +493,69 @@ function Game:record_doors(room)
 end
 
 function Game:hook_KillHero(base, victim, triggerArgs)
+	-- Competitive mode, already on the way back to the Crossroads: no death sequence.
+	if self.going_home then return end
 	if self:race_run_live() then
 		self.race.finished = true
 		self.log('game: hero died in race run')
 		if self.client then
 			self.client:report_progress(self:progress(false), true)
-			self.client:report_complete(false)
+			self.client:report_complete(false, nil, self:run_stats(), self:build_list())
 		end
+		-- Straight home like a forfeit: the death sequence would play story
+		-- scenes in Hub_Main and wait for input before the results.
+		if self:competitive_active() and self:go_home('died') then return end
 	end
 	return base(victim, triggerArgs)
 end
 
 function Game:hook_RecordRunCleared(base, ...)
-	local res = base(...)
 	local run = self.G.CurrentRun
+	-- The clear screen shows CurrentRun.GameplayTime, the game's paused-in-menus
+	-- clock; in a race it shows the one real-time race clock instead.
+	if self:race_run_live() and run and self.client then run.GameplayTime = self.client:race_time() end
+	local res = base(...)
 	if self:race_run_live() and run and run.Cleared and not run.ActiveBounty and not run.IsDreamRun then
 		self.race.finished = true
+		self.race.cleared = true
 		self.log('game: race run cleared')
-		if self.client then self.client:report_complete(true) end
+		if self.client then self.client:report_complete(true, nil, self:run_stats(), self:build_list()) end
 	end
 	return res
+end
+
+-- After the clear screen the competitive profile would walk into the story
+-- rooms; go back to the Crossroads instead, where the results are shown.
+function Game:hook_CloseRunClearScreen(base, ...)
+	local res = base(...)
+	if self.race and self.race.cleared and self:competitive_active() and not self.race.sent_home then
+		self.race.sent_home = true
+		self:go_home('run cleared')
+	end
+	return res
+end
+
+-- Back to the competitive Crossroads the way competitive mode first arrives
+-- (run over, walk in from the Crossroads door), not through a death: the
+-- death sequence plays story events and waits for input between the race
+-- and its results.
+function Game:go_home(why)
+	local G = self.G
+	local run = G.CurrentRun
+	if not (run and run.Hero and G.LoadMap) then return false end
+	self.log('game: returning to the Crossroads (' .. tostring(why) .. ')')
+	self.going_home = true
+	run.Hero.IsDead = true
+	run.NextHeroStartPoint, run.NextHeroEndPoint = 40009, 40012
+	self:spawn(function()
+		if G.wait then G.wait(0.5) end
+		G.LoadMap({ Name = 'Hub_PreRun' })
+	end)
+	return true
+end
+
+function Game:in_hub_now()
+	if self.going_home and self:in_hub() then self.going_home = false end
 end
 
 -- competitive mode ------------------------------------------------------------------
@@ -776,7 +819,73 @@ function Game:progress(alive)
 		max_hp = hero and hero.MaxHealth or nil,
 		alive = alive ~= false and not (hero and hero.IsDead),
 		build = self:build_list(),
+		stats = self:run_stats(),
 	}
+end
+
+local function sum(t)
+	local n = 0
+	for _, v in pairs(type(t) == 'table' and t or {}) do
+		if type(v) == 'number' then n = n + v end
+	end
+	return n
+end
+
+-- This run's numbers for the race results (all from CurrentRun, as the game's
+-- own run clear screen reads them).
+function Game:run_stats()
+	local run = self.G.CurrentRun
+	if not run then return {} end
+	local hero = run.Hero or {}
+	local function int(v) return math.floor((tonumber(v) or 0) + 0.5) end
+	local gained = type(run.ResourcesGained) == 'table' and run.ResourcesGained or {}
+	return {
+		DamageDealt = int(sum(run.DamageDealtByHeroRecord) + sum(run.DamageDealtByCharmedEnemiesRecord)),
+		DamageTaken = int(run.TotalDamageTaken or sum(run.DamageTakenFromRecord)),
+		Kills = int(sum(run.EnemyKills)),
+		Healed = int(sum(run.ActualHealthRecord)),
+		GoldEarned = int(gained.Money),
+		Rooms = #(run.RoomHistory or {}),
+		DeathDefiancesUsed = int(hero.LastStandsUsed),
+		Hammers = int(hero.HammerCount),
+		Boons = #self:build_list(),
+		MaxHealth = int(hero.MaxHealth),
+	}
+end
+
+-- Pause menu "Forfeit Race" (or Quit) during a live race: ask first (the
+-- Race Board shows the prompt, controller-first). See competitive.lua.
+function Game:forfeit_available()
+	return self:race_run_live() and self.client ~= nil
+end
+
+function Game:request_forfeit()
+	if not self:forfeit_available() then return false end
+	self.log('game: forfeit requested')
+	if self.board then self.board:prompt('forfeit') end
+	return true
+end
+
+-- Give up: a DNF like dying. Report first, then end the run: straight home in
+-- competitive mode, a normal death otherwise (the KillHero hook sees the race
+-- as finished already).
+function Game:forfeit_now()
+	if not self:forfeit_available() then return false end
+	local G = self.G
+	self.race.finished = true
+	self.race.forfeited = true
+	self.log('game: forfeiting the race')
+	self.client:report_progress(self:progress(false), true)
+	self.client:forfeit(self:run_stats(), self:build_list())
+	if self:competitive_active() then return self:go_home('forfeit') end
+	local hero = G.CurrentRun and G.CurrentRun.Hero
+	if hero and not hero.IsDead and G.Kill then
+		self:spawn(function()
+			if G.wait then G.wait(0.5) end
+			G.Kill(hero, { AttackerName = 'RankedRaceForfeit' })
+		end)
+	end
+	return true
 end
 
 -- Diagnostics for the test logs: map changes immediately, a heartbeat every 15s.
@@ -825,6 +934,13 @@ end
 
 function Game:update()
 	pcall(self.diagnose, self, self.now())
+	self:in_hub_now()
+	-- One timer: the game's own run timer pauses for menus and boon choices,
+	-- so in competitive mode it is hidden and the race clock is the only one.
+	if self:competitive_active() and self.G.SetConfigOption and self.now() - (self.last_timer_block or 0) >= 1 then
+		self.last_timer_block = self.now()
+		pcall(self.G.SetConfigOption, { Name = 'BlockGameplayTimer', Value = true })
+	end
 	if self:race_run_live() and self.client then
 		local now = self.now()
 		if now - self.last_progress >= 0.5 then
@@ -998,6 +1114,17 @@ function Game:bot_advance_dialogue()
 	end
 end
 
+-- Back home after a death, the game waits for any input before giving the
+-- player control (StartDeathLoop); a player would press something.
+function Game:bot_wake_death_loop()
+	local G = self.G
+	local now = self.now()
+	if self:in_hub() and G.notifyExistingWaiters and now - (self.last_death_wake or 0) >= 2 then
+		self.last_death_wake = now
+		G.notifyExistingWaiters('ReattachCameraOnInput')
+	end
+end
+
 -- An open boon/upgrade choice: take the first option, like clicking it.
 function Game:bot_choose_upgrade()
 	local G = self.G
@@ -1056,6 +1183,20 @@ end
 -- Calls the game's own clear bookkeeping (what OpenRunClearScreen does after a
 -- final boss), which our RecordRunCleared hook turns into a victory report.
 function Game:bot_win()
+	local G = self.G
+	local cfg = self.bot_cfg or {}
+	-- clear_screen: go through the game's own run clear screen (as after the
+	-- final boss), then close it like a player would.
+	if cfg.clear_screen and self:fn('OpenRunClearScreen') and self:fn('CloseRunClearScreen') then
+		self.log('game: bot clearing the run through the run clear screen')
+		self:spawn(G.OpenRunClearScreen)
+		self:spawn(function()
+			G.waitUnmodified(cfg.clear_screen_seconds or 6)
+			local screen = G.ActiveScreens and G.ActiveScreens.RunClear
+			if screen then G.CloseRunClearScreen(screen) end
+		end)
+		return
+	end
 	self.log('game: bot recording run clear')
 	self:call('RecordRunCleared')
 end
