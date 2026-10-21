@@ -140,6 +140,11 @@ Fixes in `game.lua`:
   falls back to the taken door's reward.
 - **Seeded side rolls** (`Game:seeded_call`, like spawns): golden urns (`HandleBreakableSwap`), gold drops
   (`CheckMoneyDrop`, per enemy name and count), object values, the Charon swap item check.
+- **Lifetime totals** (0.5.1): every resource's `LifetimeResourcesGained` starts at 100000, past the
+  game's highest lifetime threshold (10000). ~150 reward/room/shop rules read them; e.g. Bones
+  (`MetaCurrencyDrop`, LootData MetaProgress store) need 5 lifetime Ashes. Starting at 0, a racer who
+  picked up Ashes at depth 4 unlocked Bones for themselves only; at depth 8 the other racer's top
+  pick fell to Nectar (seen in a 10-room diverging run).
 - **Profile** (`profile.lua` `mark_story_seen`): every text line set and VO cue heard, first pickups
   (`UseRecord`, `LootPickups`), tutorials (`Flags`), screens, objectives, quests, rooms entered, traits seen,
   `ReachedTrueEnding` (without it the fully-heard story leaves Hecate "missing": no Erebus boss, and a Typhon

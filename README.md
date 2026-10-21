@@ -60,3 +60,11 @@ Plain TCP, newline-delimited JSON; message types are in `server/src/protocol.ts`
 See [CLAUDE.md](CLAUDE.md) for layout and commands and [NOTES.md](NOTES.md) for
 what has been verified in the game. `scripts/suite.sh --game` runs everything,
 including two real game clients racing each other on the Linux test PC.
+
+## How it was made, and license
+
+This mod was developed with AI (Claude, by Anthropic), and it is fully open
+source under the [MIT License](LICENSE). It is a fan project, not affiliated with
+Supergiant Games; Hades II and its assets belong to Supergiant. The installers
+download the mod loader and libraries from Thunderstore; nothing from the game is
+included here.

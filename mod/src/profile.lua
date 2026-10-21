@@ -36,6 +36,10 @@ local TUTORIAL_FLAGS = { 'SeenElementalIcons', 'SeenUnityBoons', 'HasPinnedAnyBo
 	'InspectedMetaUpgrade', 'SecondUpgradeReminder', 'MetaUpgradeExpandPsycheHint', 'HasUsedSaveFirstSystem',
 	'HasUsedWeaponShopNavigation', 'HasMultiPlanted', 'HasShuffledMusicPlayer' }
 
+-- Every resource's lifetime total (see mark_story_seen): above the game's
+-- highest lifetime threshold (10000, cosmetics).
+Profile.LIFETIME_TOTAL = 100000
+
 -- Completed runs recorded in history; feeds GetCompletedRuns-based eligibility.
 local STUB_RUNS = 50
 
@@ -125,8 +129,16 @@ function Profile.mark_story_seen(G, GS)
 	for name in pairs(G.RoomData or {}) do GS.RoomsEntered[name] = math.max(GS.RoomsEntered[name] or 0, 10) end
 	GS.TraitsSeen = GS.TraitsSeen or {}
 	for name in pairs(G.TraitData or {}) do GS.TraitsSeen[name] = true end
+	-- Lifetime totals of every resource, past every threshold the game checks
+	-- (the highest is 10000). ~150 reward, room and shop rules read them, e.g.
+	-- Bones are only offered after 5 lifetime Ashes: started at 0, a racer who
+	-- picked up Ashes unlocked Bones for themselves only, mid-race.
 	GS.LifetimeResourcesGained = GS.LifetimeResourcesGained or {}
-	GS.LifetimeResourcesGained.MetaCurrency = math.max(GS.LifetimeResourcesGained.MetaCurrency or 0, 1000)
+	for name in pairs(G.ResourceData or {}) do
+		if type(name) == 'string' then
+			GS.LifetimeResourcesGained[name] = math.max(GS.LifetimeResourcesGained[name] or 0, Profile.LIFETIME_TOTAL)
+		end
+	end
 	-- A Dream Dive's first biome avoids the last dive's: no last dive.
 	GS.LastDreamStartingBiome = nil
 	return sets

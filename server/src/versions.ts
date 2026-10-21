@@ -5,7 +5,7 @@
 // (a Unix timestamp), so the older side is the one that needs to update.
 
 /** Oldest mod version this server accepts (older clients speak another protocol). */
-export const MIN_MOD_VERSION = "0.5.0";
+export const MIN_MOD_VERSION = "0.5.1";
 
 export interface ClientVersions {
   /** Ranked Race version, e.g. "0.5.0" (anything unparsable counts as unknown). */
