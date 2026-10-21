@@ -42,7 +42,7 @@ describe("version checks on the server", () => {
     const { server } = makeServer();
     const old = hello(server, "Old", "0.2.0", SEP23);
     assert.equal(old.last("error").code, "update_required");
-    assert.match(old.last("error").message, /too old.*update to 0\.3\.0/);
+    assert.match(old.last("error").message, /too old.*update to 0\.4\.0/);
     for (const m of [{ type: "create_lobby" }, { type: "find_match" }, { type: "join_lobby", code: "ABCD", create: true }]) {
       old.clear();
       old.send(m);
@@ -53,8 +53,8 @@ describe("version checks on the server", () => {
 
   it("joining a lobby with another game build is refused; both are told who updates", () => {
     const { server } = makeServer();
-    const host = hello(server, "Mel", "0.3.0", OCT15);
-    const guest = hello(server, "Zag", "0.3.0", SEP23);
+    const host = hello(server, "Mel", "0.4.0", OCT15);
+    const guest = hello(server, "Zag", "0.4.0", SEP23);
     host.send({ type: "create_lobby" });
     guest.send({ type: "join_lobby", code: host.last("lobby_created").code });
     const g = guest.last("error");
@@ -71,32 +71,33 @@ describe("version checks on the server", () => {
 
   it("a different mod minor version is refused; a patch difference races", () => {
     const { server, random } = makeServer();
-    const a = hello(server, "A", "0.3.0", SEP23);
-    const b = hello(server, "B", "0.4.1", SEP23);
+    const a = hello(server, "A", "0.4.0", SEP23);
+    const b = hello(server, "B", "0.5.1", SEP23);
     a.send({ type: "create_lobby" });
     b.send({ type: "join_lobby", code: a.last("lobby_created").code });
     assert.equal(b.last("error").who, "rival");
     assert.equal(a.last("error").who, "you");
-    assert.match(a.last("error").message, /update Ranked Race \(you have 0\.3\.0, they have 0\.4\.1\)/);
-    const c = hello(server, "C", "0.3.2", SEP23);
+    assert.match(a.last("error").message, /update Ranked Race \(you have 0\.4\.0, they have 0\.5\.1\)/);
+    const c = hello(server, "C", "0.4.2", SEP23);
     c.send({ type: "join_lobby", code: a.last("lobby_created").code });
     assert.equal(c.last("lobby_joined").opponent, "A");
     void random;
   });
 
-  it("Find Match only pairs compatible racers and explains a mismatch to both", () => {
+  it("Find Match only groups compatible racers and explains a mismatch to both", () => {
     const { server } = makeServer();
-    const a = hello(server, "A", "0.3.0", SEP23);
-    const b = hello(server, "B", "0.3.0", OCT15);
+    const a = hello(server, "A", "0.4.0", SEP23);
+    const b = hello(server, "B", "0.4.0", OCT15);
     a.send({ type: "find_match" });
     b.send({ type: "find_match" });
     assert.equal(a.last("error").code, "version_mismatch");
     assert.equal(a.last("error").who, "you");
     assert.equal(b.last("error").who, "rival");
-    assert.equal(a.all("lobby_joined").length + b.all("lobby_joined").length, 0);
-    const c = hello(server, "C", "0.3.0", OCT15);
+    assert.equal(a.state().players.length, 1);
+    assert.equal(b.state().players.length, 1, "B opened its own lobby");
+    const c = hello(server, "C", "0.4.0", OCT15);
     c.send({ type: "find_match" });
-    assert.equal(c.last("lobby_joined").opponent, "B");
-    assert.equal(a.all("lobby_joined").length, 0);
+    assert.deepEqual(c.state().players.map((p) => p.name), ["B", "C"]);
+    assert.equal(a.state().players.length, 1);
   });
 });

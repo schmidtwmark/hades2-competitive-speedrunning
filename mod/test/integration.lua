@@ -1,7 +1,7 @@
 -- Lua client (real LuaSocket transport) against a real server and a mock bot.
 -- Usage: lua integration.lua <port> <code-file> <outcome win|die> <finish_after_s>
--- Hosts a lobby, writes its code to <code-file>, votes, readies, plays a fake
--- run, and prints RESULT: PASS / RESULT: FAIL.
+-- Hosts a lobby, writes its code to <code-file>, starts once the bot is in,
+-- votes, readies, plays a fake run, and prints RESULT: PASS / RESULT: FAIL.
 
 package.path = 'src/?.lua;' .. package.path
 local socket = require('socket')
@@ -42,7 +42,7 @@ c = Client.new({
 c:connect('127.0.0.1', port)
 
 local deadline = socket.gettime() + 30
-local created, completed = false, false
+local created, started, completed = false, false, false
 local depth = 0
 local last_room = 0
 while socket.gettime() < deadline and not events.result do
@@ -50,6 +50,11 @@ while socket.gettime() < deadline and not events.result do
 	if c.state.conn == 'connected' and c.state.id and not created then
 		created = true
 		c:create_lobby()
+	end
+	local lobby = c.state.lobby
+	if not started and lobby and lobby.phase == 'waiting' and #(lobby.players or {}) >= 2 and c:is_host() then
+		started = true
+		c:start_race()
 	end
 	if c:racing() then
 		local t = c:race_time()
@@ -75,7 +80,7 @@ end
 check(events.code, 'no lobby code')
 check(events.race and events.race.seed and events.race.seed > 0, 'no race_start with seed')
 check(events.go_at, 'countdown never fired')
-check(c.state.opponent ~= nil, 'never saw opponent progress')
+check(c:rivals()[1] and c:rivals()[1].progress ~= nil, 'never saw opponent progress')
 check(events.result, 'no race_result')
 local expect_win = outcome == 'win'
 check(events.result.you_won == expect_win, 'you_won=' .. tostring(events.result.you_won))

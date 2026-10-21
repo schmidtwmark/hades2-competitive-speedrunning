@@ -1,5 +1,6 @@
 -- The Race Board: a native, controller-first screen for everything before
--- and after a race (Find Match, private lobby codes, votes, ready, results).
+-- and after a race (Find Match, private lobby codes, votes, ready, results),
+-- for races of two up to five racers.
 -- It is built like the game's own menus (OnScreenOpened, CreateScreenFromData,
 -- interactable screen components, NotifyOnInteractOrControlPressed), so the
 -- gamepad cursor, Confirm and Cancel work exactly as in the Keepsake rack.
@@ -26,9 +27,21 @@ Board.colors = { GOLD = GOLD, GREEN = GREEN, RED = RED, GREY = GREY }
 local REASONS = {
 	completed_first = 'First to clear the run.',
 	survivor_finished = 'The only racer to finish.',
-	no_finishers = 'Neither racer finished.',
+	no_finishers = 'Nobody finished the run.',
 	time_limit = 'The race hit its time limit.',
 }
+
+function Board.ordinal(n)
+	local tail = n % 100
+	local suffix = (tail >= 11 and tail <= 13) and 'th' or (({ 'st', 'nd', 'rd' })[n % 10] or 'th')
+	return n .. suffix
+end
+
+-- "A", "A and B", "A, B and C".
+function Board.join_names(list)
+	if #list <= 1 then return list[1] or '' end
+	return table.concat(list, ', ', 1, #list - 1) .. ' and ' .. list[#list]
+end
 
 local function fmt_clock(t)
 	if type(t) ~= 'number' then return '--:--' end
@@ -71,6 +84,46 @@ function Board.result_line(e)
 	if type(e.time) ~= 'number' then return word, e.victory and GREEN or RED end
 	if e.victory then return word .. ' ' .. fmt_clock(e.time), GREEN end
 	return word .. ' at ' .. fmt_clock(e.time), RED
+end
+
+-- Results table for three or more racers: a column per racer in finishing
+-- order (place, name, result, depth, boons) and a row per stat, best in gold.
+function Board.standings(results, my_id)
+	local sorted = {}
+	for i, e in ipairs(results) do sorted[i] = e end
+	table.sort(sorted, function(a, b) return (a.place or 99) < (b.place or 99) end)
+	local out = { cols = {}, rows = {} }
+	for i, e in ipairs(sorted) do
+		local word = OUTCOME_TEXT[e.outcome] or (e.victory and 'Cleared' or 'Did Not Finish')
+		out.cols[i] = { place = e.place and Board.ordinal(e.place) or '-', name = Board.safe(e.name), result = word,
+			time = type(e.time) == 'number' and fmt_clock(e.time) or nil, color = e.victory and GREEN or RED,
+			depth = e.depth and ('Depth ' .. e.depth) or nil, build = e.build or {}, me = e.id == my_id,
+			winner = e.victory and e.place == 1 }
+	end
+	for _, row in ipairs(Board.STAT_ROWS) do
+		local vals, any = {}, false
+		for i, e in ipairs(sorted) do
+			vals[i] = (e.stats or {})[row.key]
+			if vals[i] ~= nil then any = true end
+		end
+		if any then
+			local best, all_same = nil, true
+			for i = 1, #sorted do
+				local v = vals[i]
+				if type(v) == 'number' then
+					if best ~= nil and v ~= best then all_same = false end
+					if best == nil or (row.better == 'high' and v > best) or (row.better == 'low' and v < best) then best = v end
+				end
+			end
+			local cells, gold = {}, {}
+			for i = 1, #sorted do
+				cells[i] = vals[i] ~= nil and tostring(vals[i]) or '-'
+				gold[i] = row.better ~= nil and not all_same and vals[i] == best
+			end
+			out.rows[#out.rows + 1] = { label = row.label, cells = cells, best = gold }
+		end
+	end
+	return out
 end
 
 function Board.compare(me, them)
@@ -128,14 +181,16 @@ function Board.view(c, ui, now, names)
 
 	-- In-run prompt from the pause menu's "Forfeit Race" (or Quit).
 	if ui.prompt == 'forfeit' then
-		local opp_name = Board.safe(c:opponent_name() or 'your rival')
+		local rivals = c:rivals()
 		local dec = st.decided
 		d.id, d.title, d.title_color = 'prompt:forfeit', 'Forfeit the Race?', RED
 		line('Your run ends here and counts as a DNF.')
 		if dec and not dec.you_won and not dec.draw then
-			line(opp_name .. ' has already won the race.', GREY)
+			line(Board.safe(dec.winner_name or 'Your rival') .. ' has already won the race.', GREY)
+		elseif #rivals == 1 then
+			line(Board.safe(rivals[1].name) .. ' still has to finish to win.', GREY)
 		else
-			line(opp_name .. ' still has to finish to win.', GREY)
+			line('Your rivals still have to finish to win.', GREY)
 		end
 		button('forfeit', 'Forfeit', 'forfeit_confirm')
 		button('keep', 'Keep Racing', 'prompt_cancel')
@@ -152,12 +207,12 @@ function Board.view(c, ui, now, names)
 	local lobby = st.lobby
 	if not lobby then
 		if st.queue then
-			d.id, d.title = 'queue', 'Finding a Rival'
+			d.id, d.title = 'queue', 'Finding Rivals'
 			if st.mismatch then
 				for _, l in ipairs(Board.mismatch_lines(st.mismatch)) do line(l.text, l.color) end
 				d.id = 'queue:mismatch'
 			else
-				line('Searching for another racer...')
+				line('Searching for other racers...')
 			end
 			line('Waiting ' .. fmt_clock(now - (st.queue.since or now)):gsub('%.%d+$', ''), GREY)
 			button('cancel_search', 'Cancel Search', 'cancel_queue')
@@ -196,21 +251,79 @@ function Board.view(c, ui, now, names)
 		return d
 	end
 
-	local opp = Board.safe(c:opponent_name() or 'your rival')
+	local rivals = c:rivals()
+	local opp = Board.safe(#rivals == 1 and rivals[1].name or 'your rivals')
+	local players = lobby.players or {}
 	local phase = lobby.phase
-	if phase == 'waiting' then
-		d.id, d.title = 'waiting', 'Private Race'
+	-- Everyone in the lobby, one line each.
+	local function roster()
+		for _, p in ipairs(players) do
+			local tags = {}
+			if p.id == lobby.you then tags[#tags + 1] = 'you' end
+			if p.host and not lobby.public then tags[#tags + 1] = 'host' end
+			line(Board.safe(p.name) .. (#tags > 0 and ('  (' .. table.concat(tags, ', ') .. ')') or ''),
+				p.connected == false and GREY or BODY)
+		end
+	end
+	-- Names of the other players for whom pred(p) is false.
+	local function waiting_on(pred)
+		local out = {}
+		for _, p in ipairs(players) do
+			if p.id ~= lobby.you and not pred(p) then out[#out + 1] = Board.safe(p.name) end
+		end
+		return out
+	end
+	if phase == 'waiting' and lobby.public then
+		-- Find Match: more racers can join until the setup starts by itself.
+		local n, alone = #players, #players < 2
+		d.id, d.title = 'waiting:public:' .. n, 'Finding Rivals'
+		if alone and st.mismatch then
+			for _, l in ipairs(Board.mismatch_lines(st.mismatch)) do line(l.text, l.color) end
+			d.id = d.id .. ':mismatch'
+		elseif alone then
+			line('Searching for other racers...')
+		else
+			line(n .. ' racers found (up to ' .. (lobby.max_players or n) .. ').')
+		end
+		roster()
+		local left = c:starts_in()
+		if left then
+			line('The race setup starts in ' .. math.ceil(left) .. 's.', GOLD)
+		elseif alone then
+			line('Waiting ' .. fmt_clock(now - (st.search_since or now)):gsub('%.%d+$', ''), GREY)
+		end
+		button('cancel_search', 'Cancel Search', 'cancel_queue')
+		d.cancel = { action = 'cancel_queue', label = '{CN} Cancel' }
+	elseif phase == 'waiting' then
+		local n, host = #players, c:is_host()
+		d.id, d.title = 'waiting:' .. n .. ':' .. tostring(host), 'Private Race'
 		line('Code  ' .. (lobby.code or '????'):gsub('.', '%0 '):gsub(' $', ''), GOLD)
-		line('Share this code with your rival.', GREY)
-		line('Waiting for a rival to join...')
+		line('Share this code with your rivals (up to ' .. (lobby.max_players or 2) .. ' racers).', GREY)
+		roster()
+		if not host then
+			local host_name = 'the host'
+			for _, p in ipairs(players) do
+				if p.host then host_name = Board.safe(p.name) end
+			end
+			line('Waiting for ' .. host_name .. ' to start the race...', GREY)
+		elseif n >= 2 then
+			button('start', 'Start Race', 'start')
+		else
+			line('Waiting for a rival to join...')
+		end
 		button('leave', 'Leave Race', 'leave')
 	elseif phase == 'voting_weapon' or phase == 'voting_keepsake' then
 		local kind = phase == 'voting_weapon' and 'weapon' or 'keepsake'
 		local v = st.vote or { options = {} }
 		d.title = kind == 'weapon' and 'Vote: Weapon' or 'Vote: Keepsake'
 		local left = math.max(0, math.ceil((v.deadline or now) - now))
-		line('vs ' .. opp .. '   -   ' .. left .. 's left')
-		line(v.opponent_voted and (opp .. ' has voted.') or (opp .. ' is choosing...'), GREY)
+		if #rivals == 1 then
+			line('vs ' .. opp .. '   -   ' .. left .. 's left')
+			line((v.voters or {})[rivals[1].id] and (opp .. ' has voted.') or (opp .. ' is choosing...'), GREY)
+		else
+			line((#rivals + 1) .. ' racers   -   ' .. left .. 's left')
+			line((v.voted or 0) .. ' of ' .. (v.of or #rivals + 1) .. ' have voted. Most votes wins.', GREY)
+		end
 		d.grid = { kind = kind, cols = kind == 'weapon' and 6 or 11, items = {} }
 		local keys = {}
 		for _, o in ipairs(v.options or {}) do
@@ -224,16 +337,21 @@ function Board.view(c, ui, now, names)
 		d.focus = v.mine and ('opt_' .. v.mine) or (d.grid.items[1] and d.grid.items[1].key)
 		d.id = 'vote_' .. kind .. ':' .. #keys .. ':' .. tostring(keys[1]) .. ':' .. tostring(v.mine)
 	elseif phase == 'ready_check' then
-		local me_ready, opp_ready = false, false
-		for _, p in ipairs(lobby.players or {}) do
-			if p.id == lobby.you then me_ready = p.ready else opp_ready = p.ready end
+		local me_ready = false
+		for _, p in ipairs(players) do
+			if p.id == lobby.you then me_ready = p.ready end
 		end
+		local not_ready = waiting_on(function(p) return p.ready end)
 		local w = st.vote_results.weapon and st.vote_results.weapon.selected
 		local k = st.vote_results.keepsake and st.vote_results.keepsake.selected
 		d.id, d.title = 'ready:' .. tostring(me_ready), 'Ready to Race'
-		line(names(w) .. '   +   ' .. names(k), GOLD)
+		line((w and names(w) or '?') .. '   +   ' .. (k and names(k) or '?'), GOLD)
 		line('Set your Arcana, familiar and aspect here first.', GREY)
-		line(opp_ready and (opp .. ' is ready.') or ('Waiting for ' .. opp .. '...'), opp_ready and GREEN or GREY)
+		if #not_ready > 0 then
+			line('Waiting for ' .. Board.join_names(not_ready) .. '...', GREY)
+		else
+			line(#rivals == 1 and (opp .. ' is ready.') or 'Everyone else is ready.', GREEN)
+		end
 		d.show = { { kind = 'weapon', id = w }, { kind = 'keepsake', id = k } }
 		if not me_ready then button('ready', 'Ready', 'ready') end
 		button('leave', 'Leave Race', 'leave')
@@ -242,28 +360,45 @@ function Board.view(c, ui, now, names)
 		line('The race is starting.')
 		d.close = true
 	elseif phase == 'racing' then
-		-- Back in the hub while the rival is still running (after a clear or a DNF).
+		-- Back in the hub while rivals are still running (after a clear or a DNF).
 		local dec, mine = st.decided, st.race and st.race.completed
-		d.id = 'racing:' .. tostring(dec and dec.you_won) .. ':' .. tostring(mine and mine.forfeit)
 		d.title = dec and (dec.you_won and 'Victory' or 'Defeat') or 'Race in Progress'
 		d.title_color = dec and (dec.you_won and GREEN or RED) or nil
-		if dec and dec.you_won then line('You cleared first.', GREEN) end
-		local o = st.opponent
-		line(opp .. ' is still running' .. (o and o.depth and (': depth ' .. o.depth) or '') .. '.')
-		line('The full results appear when they finish.', GREY)
+		if dec and dec.you_won then
+			line('You cleared first.', GREEN)
+		elseif dec and not dec.draw and dec.winner_name then
+			line(Board.safe(dec.winner_name) .. ' cleared first.', RED)
+		end
+		local running = 0
+		for _, r in ipairs(rivals) do
+			if not r.finished then
+				running = running + 1
+				local p = r.progress
+				line(Board.safe(r.name) .. ' is still running' .. (p and p.depth and (': depth ' .. p.depth) or '') .. '.')
+			end
+		end
+		line(running > 1 and 'The full results appear when everyone finishes.' or 'The full results appear when they finish.',
+			GREY)
+		d.id = 'racing:' .. tostring(dec and dec.you_won) .. ':' .. tostring(mine and mine.forfeit) .. ':' .. #d.lines
 	elseif phase == 'finished' then
 		local r = st.result or {}
 		d.id = 'finished:' .. tostring(st.rematch_requested)
 		d.title = r.draw and 'Draw' or (r.you_won and 'Victory' or 'Defeat')
 		d.title_color = r.draw and GOLD or (r.you_won and GREEN or RED)
 		line(REASONS[r.reason] or '', GREY)
-		local me, them
-		for _, e in ipairs(r.results or {}) do
-			if e.id == lobby.you or e.id == st.id then me = e else them = e end
+		local results = r.results or {}
+		if #results == 2 then
+			local me, them
+			for _, e in ipairs(results) do
+				if e.id == lobby.you or e.id == st.id then me = e else them = e end
+			end
+			if me and them then d.compare = Board.compare(me, them) end
+		elseif #results > 2 then
+			d.table = Board.standings(results, lobby.you or st.id)
 		end
-		if me and them then d.compare = Board.compare(me, them) end
 		if st.rematch_requested then
-			line('Rematch requested. Waiting for ' .. opp .. '...', GREY)
+			local others = waiting_on(function(p) return p.rematch end)
+			line('Rematch requested. Waiting for ' .. (#others > 0 and Board.join_names(others) or 'the others') .. '...', GREY)
 		else
 			button('rematch', 'Rematch', 'rematch')
 		end
@@ -276,8 +411,11 @@ end
 
 -- Pages that need the player: the board opens itself for these in the hub.
 function Board.wants_attention(id)
-	return id ~= nil and (id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
-		or id:find(':mismatch$') ~= nil)
+	if id == nil then return false end
+	-- A private lobby's host, once someone joins: Start Race is up to them.
+	local joined = tonumber(id:match('^waiting:(%d+):true$'))
+	return id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
+		or id:find(':mismatch$') ~= nil or (joined ~= nil and joined >= 2)
 end
 
 -- actions (shared by controller presses and the test bot) ---------------------
@@ -303,6 +441,8 @@ function Board:act(action, arg)
 		c:find_match()
 	elseif action == 'cancel_queue' then
 		c:cancel_match()
+	elseif action == 'start' then
+		c:start_race()
 	elseif action == 'create' then
 		c:create_lobby()
 	elseif action == 'join_page' then
@@ -456,6 +596,8 @@ function Board:render(d)
 	local top = cy - 262 + #d.lines * 40 + 40
 	if d.compare then
 		top = self:render_compare(d.compare, cx, top)
+	elseif d.table then
+		top = self:render_table(d.table, cx, top)
 	elseif d.grid then
 		local g, n = d.grid, #d.grid.items
 		local step_x = g.kind == 'weapon' and 150 or (g.kind == 'keys' and 96 or 104)
@@ -507,7 +649,7 @@ function Board:render(d)
 	local nb = #d.buttons
 	for i, btn in ipairs(d.buttons) do
 		local x, y
-		if d.grid or d.compare then
+		if d.grid or d.compare or d.table then
 			x, y = cx + (i - (nb + 1) / 2) * 440, math.max(top, cy + 200) + 40
 		else
 			x, y = cx, math.max(top + 30, cy - 60) + (i - 1) * 100
@@ -551,11 +693,28 @@ function Board:follow_input_mode()
 	self.used_mouse = mouse
 end
 
+-- Boon icons in rarity frames, per_row to a row, centred on x. Returns rows used.
+function Board:boon_icons(prefix, build, x, y, per_row, step, scale)
+	local G, icons = self.G, {}
+	for _, entry in ipairs(build or {}) do
+		local trait = G.TraitData and G.TraitData[entry.name]
+		if trait and trait.Icon then icons[#icons + 1] = { icon = trait.Icon, rarity = entry.rarity } end
+	end
+	local n = math.min(#icons, per_row)
+	for i, e in ipairs(icons) do
+		local c, r = (i - 1) % per_row, math.floor((i - 1) / per_row)
+		local ix, iy = x - (n - 1) * step / 2 + c * step, y + r * step
+		self:component(prefix .. i, { Name = 'BlankObstacle', X = ix, Y = iy, Animation = e.icon, Scale = scale })
+		local frame = e.rarity and ('Frame_Boon_Menu_' .. e.rarity) or 'BoonIcon_Frame_Common'
+		self:component(prefix .. 'Frame' .. i, { Name = 'BlankObstacle', X = ix, Y = iy, Animation = frame, Scale = scale })
+	end
+	return math.ceil(#icons / per_row)
+end
+
 -- Results screen: both racers side by side like the run clear screen's stats
 -- panel; the better value of each row in gold, boons with rarity frames below.
 local ICON_STEP, ICONS_PER_ROW = 44, 8
 function Board:render_compare(cmp, cx, top)
-	local G = self.G
 	local col = { me = cx - 250, them = cx + 250 }
 	local y = top
 	for _, who in ipairs({ 'me', 'them' }) do
@@ -575,23 +734,44 @@ function Board:render_compare(cmp, cx, top)
 	y = y + #cmp.rows * 32 + 24
 	local rows_used = 0
 	for _, who in ipairs({ 'me', 'them' }) do
-		local shown = 0
-		for _, entry in ipairs(cmp[who].build or {}) do
-			local trait = G.TraitData and G.TraitData[entry.name]
-			if trait and trait.Icon then
-				local n = math.min(#cmp[who].build, ICONS_PER_ROW)
-				local c, r = shown % ICONS_PER_ROW, math.floor(shown / ICONS_PER_ROW)
-				local x = col[who] - (n - 1) * ICON_STEP / 2 + c * ICON_STEP
-				local iy = y + r * ICON_STEP
-				self:component('Boon_' .. who .. shown, { Name = 'BlankObstacle', X = x, Y = iy, Animation = trait.Icon, Scale = 0.3 })
-				local frame = entry.rarity and ('Frame_Boon_Menu_' .. entry.rarity) or 'BoonIcon_Frame_Common'
-				self:component('BoonFrame_' .. who .. shown, { Name = 'BlankObstacle', X = x, Y = iy, Animation = frame, Scale = 0.3 })
-				shown = shown + 1
-			end
-		end
-		rows_used = math.max(rows_used, math.ceil(shown / ICONS_PER_ROW))
+		rows_used = math.max(rows_used, self:boon_icons('Boon_' .. who, cmp[who].build, col[who], y, ICONS_PER_ROW, ICON_STEP, 0.3))
 	end
 	return y + rows_used * ICON_STEP
+end
+
+-- Results for three or more: stat labels on the left, a column per racer.
+local MINI_STEP, MINI_PER_ROW = 34, 4
+function Board:render_table(t, cx, top)
+	local n = #t.cols
+	local x_first, x_last = cx - 180, cx + 440
+	local step = n > 1 and (x_last - x_first) / (n - 1) or 0
+	local fit = math.max(6, math.floor(step / 12))
+	local y = top
+	for i, col in ipairs(t.cols) do
+		local x = x_first + (i - 1) * step
+		local name = #col.name > fit and (col.name:sub(1, fit - 1) .. '.') or col.name
+		self:label('Place' .. i, x, y, col.place, 'P22UndergroundSCMedium', 30, col.winner and GOLD or TITLE_COLOR)
+		self:label('Name' .. i, x, y + 34, name, 'P22UndergroundSCMedium', 22, col.me and GOLD or BODY)
+		self:label('Result' .. i, x, y + 62, col.result, 'P22UndergroundSCMedium', 20, col.color)
+		if col.time then self:label('Time' .. i, x, y + 86, col.time, 'NumericP22UndergroundSCMedium', 20, col.color) end
+		if col.depth then self:label('Depth' .. i, x, y + 110, col.depth, 'LatoMedium', 18, GREY) end
+	end
+	y = y + 146
+	for r, row in ipairs(t.rows) do
+		local ry = y + (r - 1) * 28
+		self:label('RowLabel' .. r, cx - 390, ry, row.label, 'LatoMedium', 18, GREY)
+		for i, cell in ipairs(row.cells) do
+			self:label('Cell' .. r .. '_' .. i, x_first + (i - 1) * step, ry, cell, 'NumericP22UndergroundSCMedium', 22,
+				row.best[i] and GOLD or BODY)
+		end
+	end
+	y = y + #t.rows * 28 + 16
+	local rows_used = 0
+	for i, col in ipairs(t.cols) do
+		rows_used = math.max(rows_used, self:boon_icons('Boon' .. i .. '_', col.build, x_first + (i - 1) * step, y,
+			MINI_PER_ROW, MINI_STEP, 0.22))
+	end
+	return y + rows_used * MINI_STEP
 end
 
 -- Update texts in place when the page is the same (timers, rival status).

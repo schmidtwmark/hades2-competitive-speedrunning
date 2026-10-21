@@ -16,8 +16,8 @@ were re-checked against this build's own `Content/Scripts` (copied to `local/gam
 
 | Piece | State | Evidence |
 |---|---|---|
-| Server: lobby, votes, ready, countdown, win/loss/draw, reconnect, Find Match, race by code | built | `cd server && npm test`: 44 pass |
-| Mod: JSON, protocol client, UI, Race Board pages, rival plate | built | `cd mod && lua test/run.lua`: 39 pass (Lua 5.2.4) |
+| Server: lobbies of 2-5, host start, plurality votes, places, win/loss/draw, reconnect, Find Match, race by code, version check | built | `cd server && npm test`: 62 pass |
+| Mod: JSON, protocol client, UI, Race Board pages, rival plate, several rivals | built | `cd mod && lua test/run.lua`: 51 pass (Lua 5.2.4) |
 | Mod: LuaSocket client vs real server | built | `scripts/test-protocol.sh`: PASS |
 | Mod in a simulated game (2 clients) | built | `scripts/test-sim.sh`: PASS; 5 mutations each FAIL |
 | **Real game: mod loads, all hooks found** | verified | LogOutput.log: "game: hooks installed", no missing targets |
@@ -30,6 +30,7 @@ were re-checked against this build's own `Content/Scripts` (copied to `local/gam
 | **Native Race Board drives the whole lobby (two real clients)** | verified | `BOARD=1 CODE=1 OVERLAY=1 COMPETITIVE=1 scripts/e2e-two-games.sh 3`: both typed the same code on the on-screen keys, voted on icon grids, readied; plate + shadow checks ok; captures in local/runs/tour |
 | **Real controller input** | verified | `scripts/e2e-pad.sh`: virtual gamepad presses only (A, D-pad) -> Find Match, weapon vote Right Right A = WeaponTorch (the run started with it), Ready; run won |
 | Rival plate, shadow Melinoë, VICTORY/DEFEAT banners in game | verified | captures (local/runs/tour); bot checks: plate built per map, shadow placed with 0 error |
+| **Races of more than two (two real clients + two mock racers)** | verified | `MOCKS=2 COMPETITIVE=1 BOARD=1 OVERLAY=1 scripts/e2e-two-games.sh 3` (via `MOCKS=2 scripts/screenshot-tour.sh local`): 4-racer private lobby, host pressed Start Race on the board, same seed for all four, plate with three coloured rows, shadows placed, standings table on both results screens, winner completed_first |
 | **Full suite** | green | `scripts/suite.sh --game`: 9/9 gates (2026-10-20) |
 
 "Win" in the real-game tests calls the game's own `RecordRunCleared` (what the
@@ -126,14 +127,22 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   replayed). Pages are a pure function of client state (`Board.view`, unit tested).
   Weapon icons: each weapon's base aspect `TraitData[...].Icon`; keepsakes:
   `InRackIcon or Icon`. Code entry is an 8x4 on-screen keyboard of the server's code alphabet.
-- **Matchmaking**: Find Match (server queue, oldest first; re-queues after reconnect),
-  Create Private Race (random code), Race by Code (`join_lobby` with `create`: an unused
-  code opens a lobby under it, so both racers can type an agreed code).
+- **Matchmaking** (2-5 racers per race, `maxPlayers`): Find Match joins an open public
+  lobby whose racers are all version-compatible (or opens one); once two are in it starts
+  by itself after `matchGatherMs` (15 s), or at once when full. Create Private Race (random
+  code) makes you the host, who presses Start Race (`start_race`) once everyone is in. Race
+  by Code (`join_lobby` with `create`: an unused code opens a lobby under it, so friends can
+  type an agreed code; the first one hosts). Joining a lobby that is already racing is
+  refused (`lobby_busy`).
 - **Rival plate** (`mod/src/hud.lua`, top right, Combat_UI group): HUD fonts/colours, the
   player's `HPBarFill` art (its fraction is the *missing* part), boon icons with
   `Frame_Boon_Menu_<Rarity>`; fades with the game's HUD while `MapState.CombatUIHide` is set.
+  One rival gets the full plate (name, status, depth, delta, HP, boons); two to four get a
+  compact row each in their own colour (violet, teal, gold, coral), rebuilt when the count
+  changes.
 - **Shadow Melinoë** (`mod/src/shadow.lua`): `BlankObstacle3D` + GrannyModel `Melinoe_Mesh`,
-  tinted/alpha'd, teleported toward the rival's 12 Hz ghost reports while in the same room.
+  tinted (the rival's plate colour) and alpha'd, one per rival in your room, teleported
+  toward that rival's 12 Hz ghost reports.
 - **Banners** (`mod/src/banner.lua`): 3-2-1-GO from the server start time; result via
   `DisplayInfoBanner` (the biome-cleared banner).
 - **Map loads destroy objects and the engine reuses their ids.** Every object id the mod
@@ -150,12 +159,14 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
 
 ## Race rules, forfeit, timer, results (verified in game)
 
-- **Rules (server):** first clear decides the winner (`race_decided` goes to both while the
-  other may still be running); dying, forfeiting and disconnecting are DNFs, so the other
-  racer must still clear to win; no clears = draw (`no_finishers`); a 3 h cap turns anyone
+- **Rules (server):** first clear decides the winner (`race_decided` goes to everyone while
+  others may still be running); dying, forfeiting and disconnecting are DNFs, so the others
+  must still clear to win; no clears = draw (`no_finishers`); a 3 h cap turns anyone
   still running into `timeout`. The race ends (`race_result`, with each racer's outcome,
-  official time, depth, build and stats) once every entrant has finished one way or another.
-  Official times are the server clock from the race start.
+  official time, depth, build, stats and place) once every entrant has finished one way or
+  another. Places: clears by time, then DNFs by depth (deeper first), then by time (later
+  first). Official times are the server clock from the race start. Votes: plurality, ties
+  drawn at random among the tied options, no votes at all = a random option.
 - **One timer:** the game's own run timer (native `InGameUI`, "Timer Display" setting) shows
   `CurrentRun.GameplayTime`, which stops for menus, boon choices and room transitions. In
   competitive mode it is hidden (`BlockGameplayTimer`) and the mod draws one real-time race
@@ -171,10 +182,12 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
 - **Back home:** after a clear (clear screen closed), a forfeit or a death in a competitive
   race the mod loads Hub_PreRun directly (walk-in points 40009 -> 40012) instead of the death
   sequence, which plays story scenes in Hub_Main and waits for input.
-- **Results screen:** the board's finished page compares both racers like the run clear screen
-  (result + time, depth, damage dealt/taken, foes slain, healing, gold, chambers, death
-  defiances, boons, hammers; better value in gold; both boon lists). Stats come from
-  `CurrentRun` (see `Game:run_stats`).
+- **Results screen:** the board's finished page compares both racers of a 1v1 like the run
+  clear screen (result + time, depth, damage dealt/taken, foes slain, healing, gold, chambers,
+  death defiances, boons, hammers; better value in gold; both boon lists). With three or more
+  it is a standings table: a column per racer in finishing order (place, name, result, time,
+  depth, small boon icons) and a row per stat, best in gold. Stats come from `CurrentRun`
+  (see `Game:run_stats`).
 - **Recordings:** `scripts/record.sh NAME WINDOWS -- <test command>` records the game windows
   on the test PC (x11grab + VAAPI, wall-clock timestamps) and builds `local/videos/NAME.mp4`.
 
@@ -185,7 +198,8 @@ The mod sends its version and the game build in `hello`; the game build is the r
 `e_lfanew` + 8): 1790167264 = 2026-09-23 on the tested build. The server (`server/src/versions.ts`)
 refuses mods older than `MIN_MOD_VERSION` (`update_required`) and pairs only racers with the same
 mod major.minor and the same game build (`version_mismatch` with `who`/`what`/`rival` to both, on
-join and in the Find Match queue); unknown values don't block (test tools). The board turns these
+join (checked against every racer in the lobby) and in Find Match, which only groups compatible
+racers); unknown values don't block (test tools). The board turns these
 into "Can't race X / Your Hades II is out of date / how to update". Verified in game with a mock
 rival claiming a newer build.
 

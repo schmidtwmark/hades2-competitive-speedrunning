@@ -25,6 +25,10 @@ GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /Require
 # CODE=1: both clients enter the same random race code (no host).
 # SCENARIO=clear_then_forfeit: A clears first through the game's run clear
 #   screen; B is told mid-run, keeps going two more rooms, then forfeits.
+# MOCKS=n: n mock racers (on this Mac) also join A's private lobby, and A starts
+#   once all 2+n are in. The mocks fall early (MOCK_DIE_AFTER s into the race,
+#   10 s apart); A clears after its rooms, B dies after its rooms.
+MOCKS="${MOCKS:-0}"
 if [ "${COMPETITIVE:-0}" = 1 ]; then
   GAME_ARGS="/Windowed=true /Fullscreen=false $RES /RequireFocusToUpdate=false"
 fi
@@ -44,7 +48,7 @@ if [ -n "${REMOTE_SERVER:-}" ]; then
   MAC_IP="${REMOTE_SERVER%:*}"; PORT="${REMOTE_SERVER##*:}"
 else
   (cd "$ROOT/server" && npm run --silent build) || fail "server build"
-  PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=4 COUNTDOWN_MS=3000 node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
+  PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=${VOTE_SECONDS:-4} COUNTDOWN_MS=3000 node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
 fi
@@ -64,6 +68,10 @@ for X in A B; do
     if [ "$X" = A ]; then EXTRA='"outcome":"win","clear_screen":true,"expect":"win","expect_reason":"completed_first"'
     else EXTRA='"outcome":"forfeit","rooms":'$((ROOMS + 2))',"expect":"lose","expect_reason":"completed_first"'; fi
   fi
+  if [ "$MOCKS" -gt 0 ]; then
+    if [ "$X" = A ]; then EXTRA='"outcome":"win","clear_screen":true,"expect":"win","start_at":'$((2 + MOCKS))
+    else EXTRA='"outcome":"die","expect":"lose"'; fi
+  fi
   [ "${QUEUE:-0}" = 1 ] && ROLE=queue
   [ "${CODE:-0}" = 1 ] && ROLE=code
   cat >"$RUN/bot-$X.json" <<JSON
@@ -76,6 +84,18 @@ JSON
   ssh "$HOST" "mkdir -p '$D' && rm -f '$D'/bot-result.txt '$D'/trace.json '$D'/ranked.log && cat > '$D/bot.json'" <"$RUN/bot-$X.json" || fail "bot.json $X"
 done
 ssh "$HOST" "rm -f '$TB/run/code'; $TB/instance.sh stop A >/dev/null; $TB/instance.sh stop B >/dev/null; $TB/instance.sh start A $GAME_ARGS && sleep 8 && $TB/instance.sh start B $GAME_ARGS" || fail "launch"
+
+# Mock racers join A's lobby by its code (fetched from the test PC once A writes it).
+for ((i = 1; i <= MOCKS; i++)); do  # not seq: macOS `seq 1 0` counts down
+  [ "$i" = 1 ] && (for _ in $(seq 150); do
+      ssh "$HOST" "cat '$TB/run/code' 2>/dev/null" >"$RUN/code.tmp" && [ -s "$RUN/code.tmp" ] && mv "$RUN/code.tmp" "$RUN/code" && break
+      sleep 2; done) &
+  MW=""; [ "$i" = 1 ] && MW="--weapon WeaponAxe" # one mock agrees with the bots, the rest vote the first option
+  node "$ROOT/server/dist/src/mock-client.js" --host "$MAC_IP" --port "$PORT" --name "Mock$i" --join-file "$RUN/code" $MW \
+    --outcome die --finish-after $(( ${MOCK_DIE_AFTER:-25} + 10 * (i - 1) )) --progress-every 2 --timeout "$TIMEOUT" --quiet \
+    >"$RUN/mock-$i.log" 2>&1 &
+  PIDS+=($!)
+done
 
 start=$(date +%s)
 while :; do
@@ -102,6 +122,11 @@ for X in A B; do
   echo "--- instance $X"
   cat "$RUN/$X-bot-result.txt" 2>/dev/null || { echo "(no result)"; tail -15 "$RUN/$X-ranked.log" 2>/dev/null; }
   grep -q '^RESULT: PASS' "$RUN/$X-bot-result.txt" 2>/dev/null || ok=0
+done
+for ((i = 1; i <= MOCKS; i++)); do  # not seq: macOS `seq 1 0` counts down
+  for _ in $(seq 30); do grep -q '^RESULT:' "$RUN/mock-$i.log" 2>/dev/null && break; sleep 1; done
+  echo "--- mock $i: $(grep '^RESULT:' "$RUN/mock-$i.log" | cut -c1-160)"
+  grep -q '^RESULT: {"ok":true' "$RUN/mock-$i.log" || ok=0
 done
 for X in A B; do
   if grep -q "ui: \|frame error" "$RUN/$X-ranked.log" 2>/dev/null; then

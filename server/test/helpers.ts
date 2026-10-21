@@ -125,7 +125,34 @@ export function pair(over: Partial<ServerOptions> = {}) {
   a.send({ type: "create_lobby" });
   const code = a.last("lobby_created").code;
   b.send({ type: "join_lobby", code });
+  a.send({ type: "start_race" }); // the host starts once the rival is in
   return { ...env, a, b, code };
+}
+
+/** A private lobby with n racers (host first), started. */
+export function group(n: number, over: Partial<ServerOptions> = {}) {
+  const env = makeServer(over);
+  const names = ["Alice", "Bob", "Cara", "Dion", "Eris", "Fae"];
+  const cs = names.slice(0, n).map((name) => {
+    const c = new TestClient(env.server, name);
+    c.hello();
+    return c;
+  });
+  cs[0]!.send({ type: "create_lobby" });
+  const code = cs[0]!.last("lobby_created").code;
+  for (const c of cs.slice(1)) c.send({ type: "join_lobby", code });
+  cs[0]!.send({ type: "start_race" });
+  return { ...env, cs, code };
+}
+
+/** n racers past the countdown. */
+export function racingGroup(n: number, over: Partial<ServerOptions> = {}) {
+  const env = group(n, over);
+  for (const c of env.cs) c.send({ type: "vote_weapon", weapon: "WeaponAxe" });
+  for (const c of env.cs) c.send({ type: "vote_keepsake", keepsake: "KeepsakeB" });
+  for (const c of env.cs) c.send({ type: "ready" });
+  env.scheduler.advance(3000);
+  return env;
 }
 
 /** Two clients racing (countdown elapsed). */

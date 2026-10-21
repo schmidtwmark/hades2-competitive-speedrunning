@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-A competitive 1v1 speedrun mod for Hades 2 — two players race the same seed/weapon/keepsake with a live opponent HUD. See [plan.md](plan.md) for the original architecture and milestone roadmap (M0–M5), and [NOTES.md](NOTES.md) for what has actually been verified in the game, with sources — where they disagree, NOTES.md wins.
+A competitive speedrun race mod for Hades 2 — two to five players race the same seed/weapon/keepsake with a live rival HUD (it started as 1v1; plan.md still says so). See [plan.md](plan.md) for the original architecture and milestone roadmap (M0–M5), and [NOTES.md](NOTES.md) for what has actually been verified in the game, with sources — where they disagree, NOTES.md wins.
 
 ## Repository layout
 - `mod/src/` — Lua mod loaded by Hell2Modding (H2M). No build step; raw Lua files. `main.lua` wires `client.lua` (protocol), `net.lua` (LuaSocket transport), `game.lua` (game hooks), `competitive.lua` + `profile.lua` (title-screen mode, maxed in-memory profile), the native UI (`board.lua` Race Board, `hud.lua` rival plate, `shadow.lua` shadow Melinoë, `banner.lua` countdown/result), `ui.lua` (ImGui debug window, F8) and `bot.lua` (in-game test bot, inactive unless `bot.json` exists).

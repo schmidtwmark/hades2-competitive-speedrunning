@@ -28,6 +28,8 @@ export interface MockOptions {
   progressEvery: number;
   quiet: boolean;
   timeout: number;
+  /** As host of a private lobby, start the race once this many racers are in (default 2). */
+  startAt?: number;
   /** Pretend to be this mod version / game build (default: unknown, which never blocks). */
   version?: string;
   gameBuild?: number;
@@ -66,6 +68,7 @@ export function runMock(o: MockOptions): Promise<MockResult> {
     };
 
     let raceStart = 0;
+    let startSent = false;
     let depth = 0;
     const handle = (m: ServerMessage) => {
       log(m);
@@ -101,9 +104,17 @@ export function runMock(o: MockOptions): Promise<MockResult> {
           if (choice) send({ type: `vote_${m.phase}`, [m.phase]: choice });
           break;
         }
-        case "lobby_state":
-          if (m.phase === "ready_check" && !m.players.find((p) => p.id === m.you)?.ready) send({ type: "ready" });
+        case "lobby_state": {
+          const me = m.players.find((p) => p.id === m.you);
+          if (m.phase === "ready_check" && !me?.ready) send({ type: "ready" });
+          // Host of a private lobby: start once enough racers are in.
+          if (m.phase === "waiting" && !m.public && me?.host && m.players.length >= (o.startAt ?? 2) && !startSent) {
+            startSent = true;
+            send({ type: "start_race" });
+          }
+          if (m.phase !== "waiting") startSent = false;
           break;
+        }
         case "race_start":
           res.race = { seed: m.seed, weapon: m.weapon, keepsake: m.keepsake };
           timers.push(
@@ -184,6 +195,7 @@ async function main() {
       timeout: { type: "string", default: "900" },
       quiet: { type: "boolean", default: false },
       version: { type: "string" },
+      "start-at": { type: "string" },
       "game-build": { type: "string" },
     },
   });
@@ -206,6 +218,7 @@ async function main() {
     quiet: values.quiet!,
     timeout: Number(values.timeout),
     version: values.version,
+    startAt: values["start-at"] ? Number(values["start-at"]) : undefined,
     gameBuild: values["game-build"] ? Number(values["game-build"]) : undefined,
   });
   console.log(`RESULT: ${JSON.stringify(res)}`);

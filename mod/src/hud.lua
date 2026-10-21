@@ -32,8 +32,24 @@ local CLOCK_Y = 34
 local TOP = 92            -- rival plate, under the race clock
 local BAR_SCALE = 0.32    -- HPBarFill is the player's bar, ~1050 px wide at 1.0
 local BAR_WIDTH = 1050 * BAR_SCALE
+local SMALL_BAR_SCALE = 0.2
+local SMALL_BAR_WIDTH = 1050 * SMALL_BAR_SCALE
+local ROW_H = 96          -- one compact row per rival when racing more than one
+
+-- One colour per rival, shared with their shadow (shadow.lua uses the same order).
+Hud.RIVAL_COLORS = {
+	{ 190, 150, 255, 255 }, -- violet
+	{ 110, 230, 210, 255 }, -- teal
+	{ 255, 202, 110, 255 }, -- gold
+	{ 255, 130, 120, 255 }, -- coral
+}
 local ICON_SCALE, ICON_STEP, ICONS_PER_ROW = 0.3, 44, 7
 local FADE = 0.2
+
+-- Names go into text boxes, which parse {tokens} and @icons: keep them literal.
+local function safe_name(name)
+	return (tostring(name or '?'):gsub('[{}@]', ''))
+end
 
 function Hud.biome_name(room)
 	if type(room) ~= 'string' then return '?' end
@@ -59,38 +75,52 @@ function Hud.depth_delta(mine, theirs)
 	return rooms .. ' behind you', GREEN
 end
 
--- Status line and colour for the opponent.
 local DNF_TEXT = { died = 'FALLEN', forfeit = 'FORFEITED', disconnect = 'DISCONNECTED', timeout = 'OUT OF TIME' }
+local PLACE = { '1ST', '2ND', '3RD', '4TH', '5TH' }
 
--- Status line for the rival. A rival who clears first has won, but you may
--- keep going to post your time; a rival who drops out (dies, forfeits,
--- disconnects) has not lost yet: you still have to finish.
-function Hud.status(st)
-	local r = st.result
-	if r then
-		if r.draw then return 'DRAW', GOLD end
-		return r.you_won and 'YOU WIN' or 'YOU LOSE', r.you_won and GREEN or RED
+-- Status line for one rival (r = client rival record). A rival who clears
+-- first has won, but you may keep going for your time and place; a rival who
+-- drops out (dies, forfeits, disconnects) hasn't lost to you yet: you still
+-- have to finish. `many`: racing more than one rival (shorter wording).
+function Hud.status(st, r, many)
+	local res = st.result
+	if res then
+		for _, e in ipairs(res.results or {}) do
+			if e.id == r.id and e.place then return PLACE[e.place] or ('#' .. e.place), e.place == 1 and GOLD or GREY end
+		end
+		if res.draw then return 'DRAW', GOLD end
+		return res.you_won and 'YOU WIN' or 'YOU LOSE', res.you_won and GREEN or RED
 	end
-	local fin = st.opponent_finished
+	local fin = r.finished
 	if fin then
 		if fin.victory then
-			if st.decided and not st.decided.you_won then return 'WON THE RACE - FINISH FOR YOUR TIME', GOLD end
+			if st.decided and st.decided.winner == r.id and not st.decided.you_won then
+				return many and 'WON THE RACE' or 'WON THE RACE - FINISH FOR YOUR TIME', GOLD
+			end
 			return 'CLEARED', GOLD
 		end
-		return (DNF_TEXT[fin.outcome] or 'FALLEN') .. ' - FINISH TO WIN', RED
+		return (DNF_TEXT[fin.outcome] or 'FALLEN') .. (many and '' or ' - FINISH TO WIN'), RED
 	end
-	if st.opponent_connected == false then return 'DISCONNECTED', RED end
-	return 'RIVAL', GREY
+	if r.connected == false then return 'DISCONNECTED', RED end
+	return many and 'RACING' or 'RIVAL', GREY
 end
 
--- Both racers share one clock, so show it once; after the rival finishes,
--- their final time.
-function Hud.clock_line(st, race_time)
-	local fin = st.opponent_finished
+-- Everyone shares one clock (shown once, at the top); a finished rival's
+-- line shows their final time.
+function Hud.clock_line(r, race_time)
+	local fin = r and r.finished
 	if fin and type(fin.time) == 'number' then
 		return (fin.victory and 'Cleared at ' or 'Fell at ') .. fmt_time(fin.time)
 	end
 	return fmt_time(race_time)
+end
+
+-- "2 ahead" / "1 behind" / "level", for the compact rows.
+function Hud.delta_short(mine, theirs)
+	local d = (theirs or 0) - (mine or 0)
+	if d == 0 then return 'level', GREY end
+	if d > 0 then return d .. ' ahead', RED end
+	return (-d) .. ' behind', GREEN
 end
 
 function Hud.new(deps)
@@ -147,17 +177,35 @@ end
 function Hud:create()
 	local G = self.G
 	local right = (G.ScreenWidth or 1920) - MARGIN
-	local p = { all = {}, boons = {}, visible = true }
-	p.name = self:text(p, right, TOP, 'P22UndergroundSCMedium', 30, 'Right', TITLE)
-	p.status = self:text(p, right, TOP + 34, 'P22UndergroundSCMedium', 18, 'Right', GREY)
-	p.where = self:text(p, right, TOP + 66, 'P22UndergroundSCMedium', 24, 'Right', WHITE)
-	p.delta = self:text(p, right, TOP + 96, 'P22UndergroundSCMedium', 20, 'Right', GREY)
-	-- HP: the player's bar fill art; its fraction is the *missing* part.
-	local bar_cx = right - BAR_WIDTH / 2
-	p.hp_fill = self:obstacle(p, bar_cx, TOP + 140, 'HPBarFill', BAR_SCALE)
-	p.hp_text = self:text(p, bar_cx, TOP + 140, 'NumericP22UndergroundSCHeavy', 22, 'Center', WHITE)
-	p.times = self:text(p, right, TOP + 172, 'NumericP22UndergroundSCMedium', 20, 'Right', GREY)
-	p.boon_top, p.right = TOP + 222, right
+	local rivals = self.client:rivals()
+	local p = { all = {}, boons = {}, visible = true, right = right, count = #rivals, rows = {} }
+	if #rivals <= 1 then
+		-- One rival: the full plate, boons included.
+		local row = {}
+		row.name = self:text(p, right, TOP, 'P22UndergroundSCMedium', 30, 'Right', TITLE)
+		row.status = self:text(p, right, TOP + 34, 'P22UndergroundSCMedium', 18, 'Right', GREY)
+		row.where = self:text(p, right, TOP + 66, 'P22UndergroundSCMedium', 24, 'Right', WHITE)
+		row.delta = self:text(p, right, TOP + 96, 'P22UndergroundSCMedium', 20, 'Right', GREY)
+		-- HP: the player's bar fill art; its fraction is the *missing* part.
+		local bar_cx = right - BAR_WIDTH / 2
+		row.hp_fill = self:obstacle(p, bar_cx, TOP + 140, 'HPBarFill', BAR_SCALE)
+		row.hp_text = self:text(p, bar_cx, TOP + 140, 'NumericP22UndergroundSCHeavy', 22, 'Center', WHITE)
+		row.times = self:text(p, right, TOP + 172, 'NumericP22UndergroundSCMedium', 20, 'Right', GREY)
+		p.boon_top = TOP + 222
+		p.rows[1] = row
+	else
+		-- Several rivals: a compact row each, in their shadow's colour.
+		for i = 1, #rivals do
+			local y, row = TOP + (i - 1) * ROW_H, {}
+			row.name = self:text(p, right, y, 'P22UndergroundSCMedium', 24, 'Right', Hud.RIVAL_COLORS[i] or TITLE)
+			row.status = self:text(p, right, y + 26, 'P22UndergroundSCMedium', 15, 'Right', GREY)
+			row.where = self:text(p, right, y + 48, 'P22UndergroundSCMedium', 18, 'Right', WHITE)
+			local bar_cx = right - SMALL_BAR_WIDTH / 2
+			row.hp_fill = self:obstacle(p, bar_cx, y + 74, 'HPBarFill', SMALL_BAR_SCALE)
+			row.hp_text = self:text(p, bar_cx, y + 74, 'NumericP22UndergroundSCHeavy', 15, 'Center', WHITE)
+			p.rows[i] = row
+		end
+	end
 	G.MapState.RankedRaceHud = p
 	self.stats.builds = self.stats.builds + 1
 end
@@ -208,35 +256,57 @@ function Hud:set_visible(p, visible)
 	self.G.SetAlpha({ Ids = ids, Fraction = visible and 1 or 0, Duration = FADE })
 end
 
+function Hud:set_hp(row, prog, small)
+	local hp, max = prog.hp or 0, prog.max_hp or prog.hp or 1
+	local frac = math.max(0, math.min(1, hp / math.max(1, max)))
+	self.G.SetAnimationFrameTarget({ Name = 'HPBarFill', Fraction = 1 - frac, DestinationId = row.hp_fill, Instant = true })
+	self:set(row.hp_text, string.format('%d/%d', math.ceil(hp), math.ceil(max)))
+end
+
+-- Returns false when the plate no longer fits the racers (rebuild it).
 function Hud:refresh(p)
-	local st, c, G = self.client.state, self.client, self.G
-	local opp = st.opponent
-	local name = c:opponent_name() or 'Rival'
-	self:set(p.name, name)
-	self:set(p.status, Hud.status(st))
-	if opp then
-		self:set(p.where, string.format('Depth %d  %s', opp.depth or 0, Hud.biome_name(opp.room)))
-		self:set(p.delta, Hud.depth_delta(self.game:race_depth(), opp.depth))
-		local hp, max = opp.hp or 0, opp.max_hp or opp.hp or 1
-		local frac = math.max(0, math.min(1, hp / math.max(1, max)))
-		G.SetAnimationFrameTarget({ Name = 'HPBarFill', Fraction = 1 - frac, DestinationId = p.hp_fill, Instant = true })
-		self:set(p.hp_text, string.format('%d/%d', math.ceil(hp), math.ceil(max)))
-		local key = ''
-		for _, e in ipairs(opp.build or {}) do key = key .. e.name .. (e.rarity or '') .. ',' end
-		if key ~= p.build_key then
-			p.build_key = key
-			self:show_build(p, opp.build)
+	local st, c = self.client.state, self.client
+	local rivals = c:rivals()
+	if #rivals ~= p.count then return false end
+	local many = #rivals > 1
+	local mine = self.game:race_depth()
+	for i, r in ipairs(rivals) do
+		local row, prog = p.rows[i], r.progress
+		self:set(row.name, safe_name(r.name))
+		self:set(row.status, Hud.status(st, r, many))
+		if many then
+			if prog then
+				local d = Hud.delta_short(mine, prog.depth)
+				self:set(row.where, string.format('Depth %d %s - %s', prog.depth or 0, Hud.biome_name(prog.room), d))
+				self:set_hp(row, prog, true)
+			else
+				self:set(row.where, 'Entering Erebus')
+				self:set(row.hp_text, ' ')
+			end
+		else
+			if prog then
+				self:set(row.where, string.format('Depth %d  %s', prog.depth or 0, Hud.biome_name(prog.room)))
+				self:set(row.delta, Hud.depth_delta(mine, prog.depth))
+				self:set_hp(row, prog)
+				local key = ''
+				for _, e in ipairs(prog.build or {}) do key = key .. e.name .. (e.rarity or '') .. ',' end
+				if key ~= p.build_key then
+					p.build_key = key
+					self:show_build(p, prog.build)
+				end
+			else
+				self:set(row.where, 'Entering Erebus')
+				self:set(row.delta, ' ')
+				self:set(row.hp_text, ' ')
+			end
+			-- The clock itself is the separate race timer; this line only shows
+			-- the rival's final time once they are done.
+			local fin = r.finished
+			self:set(row.times, (fin and type(fin.time) == 'number') and Hud.clock_line(r, c:race_time()) or ' ')
 		end
-	else
-		self:set(p.where, 'Entering Erebus')
-		self:set(p.delta, ' ')
-		self:set(p.hp_text, ' ')
 	end
-	-- The clock itself is the separate race timer; this line is only for the
-	-- rival's final time once they are done.
-	local fin = st.opponent_finished
-	self:set(p.times, (fin and type(fin.time) == 'number') and Hud.clock_line(st, c:race_time()) or ' ')
 	self.stats.refreshes = self.stats.refreshes + 1
+	return true
 end
 
 function Hud:destroy()
@@ -299,8 +369,13 @@ function Hud:update()
 	local now = self.now()
 	if now - (self.last_refresh or 0) >= 0.25 then
 		self.last_refresh = now
-		ok, err = pcall(self.refresh, self, p)
-		if not ok then return self:fail('refreshing', err) end
+		local fits
+		ok, fits = pcall(self.refresh, self, p)
+		if not ok then return self:fail('refreshing', fits) end
+		if fits == false then
+			self:destroy()
+			self.last_refresh = nil
+		end
 	end
 end
 

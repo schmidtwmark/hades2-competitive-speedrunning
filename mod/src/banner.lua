@@ -86,7 +86,7 @@ end
 -- so the loser is told they can keep going.
 function Banner.texts(r, still_running, self_running)
 	local name = r.winner_name and tostring(r.winner_name):gsub('[{}@]', '') or nil
-	if r.draw then return 'DRAW', 'Neither racer finished' end
+	if r.draw then return 'DRAW', 'Nobody finished the run' end
 	if r.you_won then return 'VICTORY', still_running and 'First to clear the run' or ((name or 'You') .. ' wins the race') end
 	if still_running and self_running then return 'DEFEAT', (name or 'Your rival') .. ' cleared first - finish for your time' end
 	return 'DEFEAT', (name or 'Your rival') .. ' wins the race'

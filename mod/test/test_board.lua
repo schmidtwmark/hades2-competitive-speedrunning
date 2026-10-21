@@ -102,11 +102,125 @@ end)
 
 T.case('board: private lobby shows the code to share', function()
 	local c, f, b = make()
-	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'waiting', you = 'p1', players = { players[1] } })
+	local host = { id = 'p1', name = 'Mel', connected = true, host = true }
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'waiting', you = 'p1', players = { host }, max_players = 5 })
 	local d = view(c, b)
-	T.eq(d.id, 'waiting')
+	T.eq(d.id, 'waiting:1:true')
 	T.eq(d.lines[1].text, 'Code  A B 2 C')
+	T.truthy(d.lines[2].text:find('up to 5 racers'))
+	T.eq(d.lines[3].text, 'Mel  (you, host)')
+	T.eq(keys(d.buttons), 'leave', 'nothing to start alone')
+	T.eq(Board.wants_attention(d.id), false)
+end)
+
+T.case('board: the host starts a private race once rivals are in; the others wait', function()
+	local c, f, b = make()
+	local three = { { id = 'p1', name = 'Mel', host = true }, { id = 'p2', name = 'Zag' }, { id = 'p3', name = 'Nemesis', connected = false } }
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'waiting', you = 'p1', players = three, max_players = 5 })
+	b.desc = view(c, b)
+	T.eq(b.desc.id, 'waiting:3:true')
+	T.eq(keys(b.desc.buttons), 'start,leave')
+	T.eq(b.desc.lines[4].text, 'Zag')
+	T.eq(b.desc.lines[5].color, Board.colors.GREY, 'a disconnected racer is greyed out')
+	T.truthy(Board.wants_attention(b.desc.id), 'the board opens for the host when someone joins')
+	b:press('start')
+	T.eq(f.last().type, 'start_race')
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'waiting', you = 'p2', players = three, max_players = 5 })
+	local d = view(c, b)
+	T.eq(d.id, 'waiting:3:false')
 	T.eq(keys(d.buttons), 'leave')
+	T.eq(d.lines[#d.lines].text, 'Waiting for Mel to start the race...')
+	T.eq(Board.wants_attention(d.id), false)
+end)
+
+T.case('board: Find Match gathers racers and counts down; B cancels', function()
+	local c, f, b = make()
+	f.t = 10
+	c:find_match()
+	f.push({ type = 'lobby_joined', code = 'QQQQ', opponent = nil })
+	f.push({ type = 'lobby_state', code = 'QQQQ', phase = 'waiting', you = 'p1', public = true, max_players = 5,
+		starts_in = nil, players = { players[1] } })
+	f.t = 25
+	b.desc = Board.view(c, b.ui, f.t)
+	T.eq(b.desc.id, 'waiting:public:1')
+	T.eq(b.desc.title, 'Finding Rivals')
+	T.eq(b.desc.lines[1].text, 'Searching for other racers...')
+	T.eq(b.desc.lines[3].text, 'Waiting 0:15')
+	T.eq(b.desc.cancel.action, 'cancel_queue')
+	local three = { players[1], players[2], { id = 'p3', name = 'Nemesis', connected = true } }
+	f.push({ type = 'lobby_state', code = 'QQQQ', phase = 'waiting', you = 'p1', public = true, max_players = 5,
+		starts_in = 15, players = three })
+	f.t = 29.2
+	local d = Board.view(c, b.ui, f.t)
+	T.eq(d.id, 'waiting:public:3')
+	T.eq(d.lines[1].text, '3 racers found (up to 5).')
+	T.eq(d.lines[2].text, 'Mel  (you)', 'no host in a Find Match lobby')
+	T.eq(d.lines[5].text, 'The race setup starts in 11s.')
+	T.eq(keys(d.buttons), 'cancel_search')
+	b:press('cancel')
+	T.eq(f.last().type, 'cancel_match')
+end)
+
+T.case('board: votes, ready and the hub race page with several rivals', function()
+	local c, f, b = make()
+	local four = { { id = 'p1', name = 'Mel' }, { id = 'p2', name = 'Zag' }, { id = 'p3', name = 'Nemesis' }, { id = 'p4', name = 'Hecate' } }
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'voting_weapon', you = 'p1', players = four })
+	f.push({ type = 'vote_phase', phase = 'weapon', timer = 15, options = { { id = 'WeaponAxe', name = 'Axe' } } })
+	f.push({ type = 'vote_cast', phase = 'weapon', by = 'opponent', id = 'p3', name = 'Nemesis', voted = 1, of = 4 })
+	local d = view(c, b)
+	T.eq(d.lines[1].text, '4 racers   -   15s left')
+	T.eq(d.lines[2].text, '1 of 4 have voted. Most votes wins.')
+	four[1].ready, four[3].ready = true, true
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'ready_check', you = 'p1', players = four })
+	d = view(c, b)
+	T.eq(d.id, 'ready:true')
+	T.eq(d.lines[3].text, 'Waiting for Zag and Hecate...')
+	four[2].ready, four[4].ready = true, true
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'ready_check', you = 'p1', players = four })
+	T.eq(view(c, b).lines[3].text, 'Everyone else is ready.')
+	-- Back in the hub after falling: Hecate cleared, two still running.
+	f.push({ type = 'race_start', race_id = 1, seed = 5, weapon = 'W', keepsake = 'K', countdown = 0, countdown_ms = 0 })
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'racing', you = 'p1', players = four })
+	f.push({ type = 'opponent_progress', id = 'p2', name = 'Zag', room = 'G_Combat01', depth = 14, hp = 9, time = 1 })
+	f.push({ type = 'opponent_finished', id = 'p4', name = 'Hecate', victory = true, time = 900, outcome = 'cleared' })
+	f.push({ type = 'race_decided', race_id = 1, winner = 'p4', winner_name = 'Hecate', draw = false, you_won = false,
+		reason = 'completed_first' })
+	d = view(c, b)
+	T.eq(d.title, 'Defeat')
+	T.eq(d.lines[1].text, 'Hecate cleared first.')
+	T.eq(d.lines[2].text, 'Zag is still running: depth 14.')
+	T.eq(d.lines[3].text, 'Nemesis is still running.')
+	T.eq(d.lines[4].text, 'The full results appear when everyone finishes.')
+	f.push({ type = 'opponent_finished', id = 'p3', name = 'Nemesis', victory = false, time = 950, outcome = 'died' })
+	local d2 = view(c, b)
+	T.truthy(d2.id ~= d.id, 'a rival finishing rebuilds the page (one line fewer)')
+	b:prompt('forfeit')
+	T.eq(view(c, b).lines[2].text, 'Hecate has already won the race.')
+end)
+
+T.case('board: results for three or more are a standings table', function()
+	local t = Board.standings({
+		{ id = 'p1', name = 'Mel', outcome = 'died', victory = false, time = 600, depth = 20, place = 3, stats = { Kills = 90, DamageTaken = 50 } },
+		{ id = 'p2', name = 'Zag', outcome = 'cleared', victory = true, time = 1500.25, depth = 41, place = 1,
+			stats = { Kills = 300, DamageTaken = 200 }, build = { { name = 'A' } } },
+		{ id = 'p3', name = 'Nemesis', outcome = 'cleared', victory = true, time = 1600, depth = 41, place = 2, stats = { Kills = 300 } },
+	}, 'p1')
+	T.eq(t.cols[1].name, 'Zag')
+	T.eq(t.cols[1].place, '1st')
+	T.truthy(t.cols[1].winner)
+	T.eq(t.cols[1].time, '25:00.25')
+	T.eq(t.cols[3].place, '3rd')
+	T.eq(t.cols[3].result, 'Fell')
+	T.truthy(t.cols[3].me)
+	local by = {}
+	for _, r in ipairs(t.rows) do by[r.label] = r end
+	T.eq(by['Foes Slain'].cells[3], '90')
+	T.eq(by['Foes Slain'].best[1] and by['Foes Slain'].best[2] and not by['Foes Slain'].best[3], true, 'ties share gold')
+	T.eq(by['Damage Taken'].cells[2], '-')
+	T.truthy(by['Damage Taken'].best[3], 'least damage taken')
+	T.eq(Board.ordinal(1) .. Board.ordinal(2) .. Board.ordinal(3) .. Board.ordinal(4) .. Board.ordinal(11) .. Board.ordinal(22),
+		'1st2nd3rd4th11th22nd')
+	T.eq(Board.join_names({ 'A', 'B', 'C' }), 'A, B and C')
 end)
 
 T.case('board: votes are an icon grid; the pick is highlighted and focused', function()
@@ -127,8 +241,9 @@ T.case('board: votes are an icon grid; the pick is highlighted and focused', fun
 	T.truthy(b.desc.id ~= before, 'voting rebuilds the page')
 	T.eq(b.desc.focus, 'opt_WeaponAxe')
 	T.truthy(b.desc.grid.items[2].selected)
-	f.push({ type = 'vote_cast', phase = 'weapon', by = 'opponent' })
-	T.truthy(view(c, b).lines[2].text:find('has voted'))
+	T.eq(view(c, b).lines[2].text, 'Zag is choosing...')
+	f.push({ type = 'vote_cast', phase = 'weapon', by = 'opponent', id = 'p2', name = 'Zag', voted = 2, of = 2 })
+	T.eq(view(c, b).lines[2].text, 'Zag has voted.')
 end)
 
 T.case('board: ready check, then the board closes for the countdown', function()
@@ -314,8 +429,39 @@ T.case('board: a version mismatch says who updates what, and opens the board', f
 	T.eq(them[2].text, "Zag's Ranked Race is out of date.")
 	local old = Board.mismatch_lines({ code = 'update_required', who = 'you', what = 'mod' })
 	T.truthy(old[3].text:find('installer'))
+	-- Find Match next to an incompatible searcher: our own lobby says why we're alone.
 	c:find_match()
-	f.push({ type = 'queued', waiting = 1 })
 	f.push({ type = 'error', code = 'version_mismatch', who = 'rival', what = 'game', rival = 'Zag', message = 'long' })
-	T.eq(view(c, b).id, 'queue:mismatch')
+	f.push({ type = 'lobby_joined', code = 'QQQQ', opponent = nil })
+	f.push({ type = 'lobby_state', code = 'QQQQ', phase = 'waiting', you = 'p1', public = true, max_players = 5, players = { players[1] } })
+	d = view(c, b)
+	T.eq(d.id, 'waiting:public:1:mismatch')
+	T.eq(d.lines[1].text, "Can't race Zag")
+	T.truthy(Board.wants_attention(d.id))
+	f.push({ type = 'lobby_state', code = 'QQQQ', phase = 'waiting', you = 'p1', public = true, max_players = 5, players = players })
+	T.eq(view(c, b).id, 'waiting:public:2', 'gone once someone can race us')
+end)
+
+T.case('board: the standings page renders with the engine', function()
+	local c, f = make()
+	local G = engine()
+	G.TraitData = { ZeusWeaponBoon = { Icon = 'BoonIcon_Zeus' } }
+	local b = Board.new({ G = G, client = c, log = function() end, now = function() return f.t end })
+	b:install()
+	local three = { players[1], players[2], { id = 'p3', name = 'Nemesis', connected = true } }
+	f.push({ type = 'race_start', race_id = 1, seed = 5, weapon = 'W', keepsake = 'K', countdown = 0, countdown_ms = 0 })
+	f.push({ type = 'race_result', race_id = 1, winner = 'p2', winner_name = 'Zag', draw = false, you_won = false,
+		reason = 'completed_first', results = {
+			{ id = 'p2', name = 'Zag', outcome = 'cleared', victory = true, time = 900, depth = 41, place = 1,
+				stats = { Kills = 5 }, build = { { name = 'ZeusWeaponBoon', rarity = 'Epic' }, { name = 'Unknown' } } },
+			{ id = 'p1', name = 'Mel', outcome = 'died', victory = false, time = 500, depth = 20, place = 2, stats = { Kills = 3 } },
+			{ id = 'p3', name = 'Nemesis', outcome = 'forfeit', victory = false, time = 100, depth = 3, place = 3, stats = {} } } })
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'finished', you = 'p1', players = three })
+	b:update(true)
+	T.truthy(b:is_open())
+	T.truthy(b.desc.table)
+	local comps = b.screen.Components
+	T.truthy(comps.Place1 and comps.Name3 and comps.Cell1_2 and comps.Boon1_1 and comps.Boon1_Frame1)
+	T.eq(comps.Boon1_2, nil, 'boons without an icon are skipped')
+	T.truthy(comps.Button_rematch)
 end)

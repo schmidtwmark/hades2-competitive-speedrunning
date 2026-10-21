@@ -8,6 +8,7 @@
 --                 | "code" (both type race_code; the first opens it)
 --                 | "pad" (hands off the lobby: a real controller drives the board)
 --   code_file     host writes the lobby code here, joiner polls it
+--   start_at      private lobby host: press Start Race once this many racers are in (default 2)
 --   weapon, keepsake  what to vote for (default: first option)
 --   rooms         room transitions to drive before the outcome (default 2)
 --   outcome       "win" | "die" | "forfeit" (pause-menu path: prompt, then Forfeit) | "none"
@@ -300,6 +301,14 @@ end
 
 function Bot:step_lobby(now, c, st)
 	local phase = c:phase()
+	-- Private lobby host (also the first to enter a race code): start once enough racers are in.
+	local lobby = st.lobby
+	if phase == 'waiting' and lobby and not lobby.public and c:is_host() and not self.start_sent
+		and #(lobby.players or {}) >= (self.cfg.start_at or 2) and not self:wait_dwell('start', now) then
+		self.start_sent = true
+		self:check('lobby filled', true, #lobby.players .. ' racers')
+		self:lobby_action({ 'start' }, function() c:start_race() end)
+	end
 	local v = self.pending_vote
 	if v and st.vote and st.vote.phase == v.phase and not self:wait_dwell('vote_' .. v.phase, now) then
 		self.pending_vote = nil
@@ -385,11 +394,15 @@ function Bot:step_play(now, c, st)
 			self:go_step('result')
 		end
 	end
-	-- Scenario: finish only once the server told us the opponent died.
-	if self.cfg.win_after_opponent_death and not self.won and st.opponent_finished then
-		self.won = true
-		self:check('saw opponent death', st.opponent_finished.victory == false)
-		self.game:bot_win()
+	-- Scenario: finish only once the server told us a rival died.
+	if self.cfg.win_after_opponent_death and not self.won then
+		for _, r in ipairs(c:rivals()) do
+			if r.finished and not self.won then
+				self.won = true
+				self:check('saw opponent death', r.finished.victory == false)
+				self.game:bot_win()
+			end
+		end
 	end
 end
 

@@ -1,7 +1,7 @@
 # Installing Ranked Race
 
-Ranked Race is a 1v1 race mod for **Hades II on Steam** (Windows, Linux, Steam
-Deck). Both racers need it installed. It is not on Thunderstore or in any mod
+Ranked Race is a race mod for two to five players of **Hades II on Steam**
+(Windows, Linux, Steam Deck). Every racer needs it installed. It is not on Thunderstore or in any mod
 manager yet; install it from this repository with the script for your system.
 macOS is not supported (the mod loader is Windows-only and Hades II on Mac does
 not run through Proton).
@@ -58,25 +58,31 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 
 ## Racing
 
-- **Find Match** pairs you with the next player who picks it; **Create Private
-  Race** gives you a 4-character code; **Race by Code** joins your rival's code, or
-  any code you both agree on (the first to enter it opens the race).
-- Vote on the weapon and keepsake, set your Arcana, familiar and aspect at the
-  Crossroads (close the board with B, reopen it at the Pitch-Black Stone), then
-  **Ready**. Both of you start the same seeded run after a 3-2-1.
-- Both racers get the same fully upgraded profile, kept in memory only: your own
+- Races have two to five racers.
+- **Find Match** puts you in a public race with whoever else is searching; once a
+  second racer is in, the setup starts by itself 15 seconds later (or at once with
+  five). **Create Private Race** gives you a 4-character code for your friends;
+  you are the host and press **Start Race** once everyone is in. **Race by Code**
+  joins a friend's code, or any code you agree on (the first to enter it opens the
+  race and hosts it).
+- Vote on the weapon and keepsake (most votes wins, ties are drawn at random), set
+  your Arcana, familiar and aspect at the Crossroads (close the board with B,
+  reopen it at the Pitch-Black Stone), then **Ready**. Everyone starts the same
+  seeded run after a 3-2-1.
+- Every racer gets the same fully upgraded profile, kept in memory only: your own
   save is never loaded or written in competitive mode.
-- Every room has the same layout and enemies for both of you whatever doors and
+- Every room has the same layout and enemies for everyone whatever doors and
   boons you pick; choices only change rewards.
-- One real-time race clock (top right) never pauses. Your rival shows as a shadow
-  Melinoë when you share a room, plus a plate with their depth, HP and boons.
+- One real-time race clock (top right) never pauses. Each rival shows as a shadow
+  Melinoë (in their own colour) when you share a room, plus a row on the rival
+  plate with their depth, HP and (in a 1v1) boons.
 - **Rules:** first to clear wins. Dying, **Forfeit Race** (pause menu) or
-  disconnecting is a DNF: your rival still has to clear to win, and if neither
-  clears it's a draw. If your rival clears first you can keep going to post your
-  time. When both are done, a results screen compares the two runs.
+  disconnecting is a DNF: the others still have to clear to win, and if nobody
+  clears it's a draw. If a rival clears first you can keep going to post your
+  time and place. When everyone is done, a results screen compares the runs.
 - The public race server is the default; nothing to configure.
-- **Both racers need matching versions:** the same Ranked Race release line
-  (e.g. any 0.3.x) and the same Hades II build. If they differ, the board says
+- **Every racer needs matching versions:** the same Ranked Race release line
+  (e.g. any 0.4.x) and the same Hades II build. If they differ, the board says
   "Can't race <name>" and who has to update what.
 
 ## Update

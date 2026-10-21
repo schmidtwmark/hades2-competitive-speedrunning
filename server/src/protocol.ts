@@ -64,6 +64,8 @@ export type ClientMessage =
   /** Give up the run: a DNF, exactly like dying (the rival still has to finish to win). */
   | { type: "forfeit"; stats?: RunStats; build?: BuildEntry[] }
   | { type: "rematch" }
+  /** Host of a private lobby: stop waiting for more racers and start voting. */
+  | { type: "start_race" }
   | { type: "ping"; t?: number };
 
 export type LobbyPhase =
@@ -94,11 +96,23 @@ export interface PlayerSummary {
   name: string;
   connected: boolean;
   ready: boolean;
+  /** The lobby's host: starts a private race once enough racers have joined. */
+  host: boolean;
+  /** Asked for a rematch after the last race. */
+  rematch: boolean;
+}
+
+/** Who a relayed message is about (races have up to five racers). */
+export interface Who {
+  id: string;
+  name: string;
 }
 
 export interface RaceResultEntry {
   id: string;
   name: string;
+  /** 1 = winner. Clears by time, then DNFs by depth reached. */
+  place: number;
   finished: boolean;
   victory: boolean;
   outcome: Outcome;
@@ -130,19 +144,31 @@ export type ServerMessage =
       you: string;
       players: PlayerSummary[];
       race: RaceSetup | null;
+      /** A Find Match lobby (starts by itself) rather than a private one (the host starts it). */
+      public: boolean;
+      max_players: number;
+      /** Find Match lobbies: seconds until voting starts, once two racers are in. */
+      starts_in: number | null;
     }
   | { type: "lobby_left" }
   | { type: "vote_phase"; phase: VotePhase; options: VoteOption[]; timer: number }
-  | { type: "vote_cast"; phase: VotePhase; by: "you" | "opponent" }
-  | { type: "vote_result"; phase: VotePhase; selected: string; votes: { you: string | null; opponent: string | null } }
+  | { type: "vote_cast"; phase: VotePhase; by: "you" | "opponent"; id: string; name: string; voted: number; of: number }
+  | {
+      type: "vote_result";
+      phase: VotePhase;
+      selected: string;
+      /** opponent: the other racer's vote in a 1v1, null otherwise; counts: votes per option. */
+      votes: { you: string | null; opponent: string | null };
+      counts: Record<string, number>;
+    }
   | ({ type: "race_start"; countdown: number; countdown_ms: number } & RaceSetup)
-  | ({ type: "opponent_progress" } & Progress)
-  | ({ type: "opponent_ghost" } & Ghost)
-  | { type: "opponent_finished"; victory: boolean; time: number | null; outcome: Outcome }
+  | ({ type: "opponent_progress" } & Progress & Who)
+  | ({ type: "opponent_ghost" } & Ghost & { id: string })
+  | ({ type: "opponent_finished"; victory: boolean; time: number | null; outcome: Outcome } & Who)
   /** The winner is known while someone is still running (they may finish their run); race_result follows. */
   | { type: "race_decided"; race_id: number; winner: string | null; winner_name: string | null; draw: boolean; you_won: boolean; reason: ResultReason }
-  | { type: "opponent_disconnected"; grace: number }
-  | { type: "opponent_reconnected" }
+  | ({ type: "opponent_disconnected"; grace: number } & Who)
+  | ({ type: "opponent_reconnected" } & Who)
   | {
       type: "race_result";
       race_id: number;
@@ -252,6 +278,7 @@ export function parseClientMessage(raw: unknown): ClientMessage {
     case "leave_lobby":
     case "ready":
     case "rematch":
+    case "start_race":
       return { type };
     case "forfeit":
       return { type, stats: optStats(o), build: optBuild(o) };

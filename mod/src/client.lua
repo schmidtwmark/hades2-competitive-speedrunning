@@ -36,13 +36,12 @@ function Client.new(opts)
 		conn = 'disconnected', -- disconnected | connecting | connected
 		id = nil,
 		token = nil,
-		lobby = nil,          -- last lobby_state message
-		vote = nil,           -- { phase, options, deadline, mine, opponent_voted }
+		lobby = nil,          -- last lobby_state message (+ received)
+		vote = nil,           -- { phase, options, deadline, mine, voted, of, voters = { [id] = true } }
 		vote_results = {},    -- phase -> vote_result message
 		race = nil,           -- race_start message + countdown_end, started
-		opponent = nil,       -- last opponent_progress
-		opponent_finished = nil,
-		opponent_connected = true,
+		-- Every other racer by id: { id, name, progress, finished, ghost, connected, present }.
+		rivals = {},
 		result = nil,         -- race_result message
 		last_error = nil,     -- { code, message, at }
 		latency = nil,
@@ -151,13 +150,17 @@ end
 
 function Client:leave_lobby() return self:send({ type = 'leave_lobby' }) end
 
--- Quick match: the server pairs us with the next player who asks.
+-- Find Match: the server puts us in an open public lobby (or opens one); it
+-- starts by itself once a few racers are in.
 function Client:find_match()
 	self.state.mismatch = nil
 	local ok = self:send({ type = 'find_match' })
 	if ok then self.state.queue = { since = self.now(), waiting = nil } end
 	return ok
 end
+
+-- Private lobby host: start the race setup with whoever has joined.
+function Client:start_race() return self:send({ type = 'start_race' }) end
 
 function Client:cancel_match()
 	self.state.queue = nil
@@ -262,12 +265,69 @@ function Client:countdown_remaining()
 	return math.max(0, r.countdown_end - self.now())
 end
 
+-- The first other racer's name (the rival in a 1v1).
 function Client:opponent_name()
 	local l = self.state.lobby
 	if not l then return nil end
 	for _, p in ipairs(l.players or {}) do
 		if p.id ~= l.you then return p.name end
 	end
+end
+
+function Client:is_host()
+	local l = self.state.lobby
+	if not l then return false end
+	for _, p in ipairs(l.players or {}) do
+		if p.host then return p.id == l.you end
+	end
+	return false
+end
+
+-- Seconds until a Find Match lobby starts by itself (nil when not counting).
+function Client:starts_in()
+	local l = self.state.lobby
+	if not (l and type(l.starts_in) == 'number') then return nil end
+	return math.max(0, l.starts_in - (self.now() - (l.received or self.now())))
+end
+
+-- The rival with this id (created on first sight).
+function Client:rival(id, name)
+	local r = self.state.rivals[id]
+	if not r then
+		r = { id = id, name = name or '?', connected = true, present = true }
+		self.state.rivals[id] = r
+	end
+	if name then r.name = name end
+	return r
+end
+
+-- The other racers: everyone in the lobby but us, then racers of this race who
+-- left (their result still counts), in a stable order.
+function Client:rivals()
+	local out, seen = {}, {}
+	local l = self.state.lobby
+	for _, p in ipairs(l and l.players or {}) do
+		if p.id ~= (l.you or self.state.id) then
+			out[#out + 1] = self:rival(p.id, p.name)
+			seen[p.id] = true
+		end
+	end
+	local rest = {}
+	for id, r in pairs(self.state.rivals) do
+		if not seen[id] and (r.progress or r.finished) then rest[#rest + 1] = r end
+	end
+	table.sort(rest, function(a, b) return a.id < b.id end)
+	for _, r in ipairs(rest) do out[#out + 1] = r end
+	return out
+end
+
+-- Rivals in the race who haven't finished one way or another yet.
+function Client:rivals_running()
+	local n = 0
+	for _, r in ipairs(self:rivals()) do
+		if r.progress and not r.finished then n = n + 1 end
+	end
+	return n
 end
 
 -- internals -----------------------------------------------------------------------
@@ -314,8 +374,9 @@ function handlers.lobby_created(c, m)
 end
 
 function handlers.lobby_joined(c, m)
+	-- Find Match keeps searching in its own lobby: remember since when.
+	c.state.search_since = c.state.queue and c.state.queue.since or c.state.search_since
 	c.state.queue = nil
-	c.state.mismatch = nil
 	c:_emit('lobby_joined', m)
 end
 
@@ -332,6 +393,8 @@ end
 
 function handlers.lobby_left(c)
 	c.state.lobby = nil
+	c.state.mismatch = nil
+	c.state.search_since = nil
 	c.state.vote = nil
 	c.state.race = nil
 	c.state.result = nil
@@ -340,12 +403,17 @@ end
 
 function handlers.lobby_state(c, m)
 	local prev = c.state.lobby
+	m.received = c.now()
 	c.state.lobby = m
 	if m.phase == 'waiting' then
 		c.state.vote = nil
 		c.state.vote_results = {}
-		c.state.opponent = nil
-		c.state.opponent_finished = nil
+	end
+	for _, p in ipairs(m.players or {}) do
+		if p.id ~= m.you then
+			local r = c:rival(p.id, p.name)
+			r.connected = p.connected ~= false
+		end
 	end
 	if m.phase ~= 'voting_weapon' and m.phase ~= 'voting_keepsake' then c.state.vote = nil end
 	if m.phase == 'racing' and c.state.race == nil and m.race then
@@ -357,13 +425,15 @@ function handlers.lobby_state(c, m)
 end
 
 function handlers.vote_phase(c, m)
-	c.state.vote = { phase = m.phase, options = m.options or {}, deadline = c.now() + (m.timer or 0) }
+	c.state.vote = { phase = m.phase, options = m.options or {}, deadline = c.now() + (m.timer or 0), voters = {} }
 	c:_emit('vote_phase', c.state.vote)
 end
 
 function handlers.vote_cast(c, m)
 	local v = c.state.vote
-	if v and v.phase == m.phase and m.by == 'opponent' then v.opponent_voted = true end
+	if not (v and v.phase == m.phase) then return end
+	if m.id then v.voters[m.id] = true end
+	v.voted, v.of = m.voted, m.of
 end
 
 function handlers.vote_result(c, m)
@@ -373,10 +443,10 @@ end
 
 function handlers.race_start(c, m)
 	c.state.result = nil
-	c.state.opponent = nil
-	c.state.ghost = nil
 	c.last_build_key = nil
-	c.state.opponent_finished = nil
+	c.state.rivals = {} -- a new race: nobody has progress yet
+	c.state.mismatch = nil
+	c.state.search_since = nil
 	c.state.decided = nil
 	c.state.rematch_requested = nil
 	c.pending_progress = nil
@@ -391,27 +461,28 @@ end
 function handlers.opponent_progress(c, m)
 	m.type = nil
 	m.received = c.now()
+	local r = c:rival(m.id or '?', m.name)
 	-- Builds arrive only on change; keep the last one.
-	if m.build == nil and c.state.opponent then m.build = c.state.opponent.build end
-	c.state.opponent = m
+	if m.build == nil and r.progress then m.build = r.progress.build end
+	r.progress = m
 end
 
 function handlers.opponent_ghost(c, m)
 	m.type = nil
 	m.received = c.now()
-	c.state.ghost = m
+	c:rival(m.id or '?').ghost = m
 end
 
 function handlers.opponent_finished(c, m)
-	c.state.opponent_finished = m
+	c:rival(m.id or '?', m.name).finished = m
 end
 
-function handlers.opponent_disconnected(c)
-	c.state.opponent_connected = false
+function handlers.opponent_disconnected(c, m)
+	c:rival(m.id or '?', m.name).connected = false
 end
 
-function handlers.opponent_reconnected(c)
-	c.state.opponent_connected = true
+function handlers.opponent_reconnected(c, m)
+	c:rival(m.id or '?', m.name).connected = true
 end
 
 -- The winner is known but someone is still running (maybe us): keep racing.

@@ -1,21 +1,23 @@
 # Hades II Ranked Race
 
-A 1v1 race mod for Hades II. Two players meet on the in-game Race Board, vote
-on a weapon and a keepsake, and start the same seeded run at the same moment.
-During the run you see your rival as a translucent shadow Melinoë whenever you
-are in the same room, plus a rival plate (top right) with their biome and
-depth, how far ahead or behind you they are, their HP and their boons, under a
-single real-time race clock that never pauses (the game's own timer, which
-stops for menus and boon choices, is hidden). Everything works with a
-controller; no keyboard or mod keys needed.
+A race mod for Hades II for two to five players. Racers meet on the in-game
+Race Board, vote on a weapon and a keepsake, and start the same seeded run at
+the same moment. During the run you see each rival as a translucent shadow
+Melinoë (one colour per rival) whenever you are in the same room, plus a rival
+plate (top right) with their biome and depth, how far ahead or behind you they
+are, their HP and (in a 1v1) their boons, under a single real-time race clock
+that never pauses (the game's own timer, which stops for menus and boon
+choices, is hidden). Everything works with a controller; no keyboard or mod
+keys needed.
 
 Rules: the first racer to clear the run wins. Dying, forfeiting (pause menu →
-Forfeit Race) or disconnecting is a DNF: the other racer still has to clear to
-win, and if neither clears it is a draw. If your rival clears first you have
-lost, but you can keep going to finish your run and post your time. When both
-are done, a results screen compares your run with your rival's: result and
-time, depth, damage dealt and taken, foes slain, healing, gold, death defiances
-and both boon lists.
+Forfeit Race) or disconnecting is a DNF: the others still have to clear to
+win, and if nobody clears it is a draw. If a rival clears first you have lost,
+but you can keep going to finish your run and post your time and place. When
+everyone is done, a results screen compares the runs: place, result and time,
+depth, damage dealt and taken, foes slain, healing, gold, death defiances and
+every racer's boons (side by side in a 1v1, a standings table for three or
+more).
 
 ## Play
 

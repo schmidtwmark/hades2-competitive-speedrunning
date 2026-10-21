@@ -110,11 +110,22 @@ function UI:draw_body()
 		return
 	end
 
-	ImGui.Text('Lobby ' .. lobby.code .. '   vs ' .. (c:opponent_name() or '(waiting)'))
-	if not st.opponent_connected then self:colored(RED, 'Opponent disconnected, waiting for reconnect...') end
+	local names = {}
+	for _, r in ipairs(c:rivals()) do
+		names[#names + 1] = r.name
+		if not r.connected then self:colored(RED, r.name .. ' disconnected, waiting for reconnect...') end
+	end
+	ImGui.Text('Lobby ' .. lobby.code .. '   vs ' .. (#names > 0 and table.concat(names, ', ') or '(waiting)'))
 	local phase = lobby.phase
 	if phase == 'waiting' then
-		ImGui.Text('Share the code ' .. lobby.code .. ' with your opponent.')
+		if lobby.public then
+			local left = c:starts_in()
+			ImGui.Text(left and string.format('Starting in %ds', math.ceil(left)) or 'Searching for racers...')
+			if ImGui.Button('Cancel search') then c:cancel_match() end
+		else
+			ImGui.Text('Share the code ' .. lobby.code .. ' with your rivals.')
+			if c:is_host() and #names > 0 and ImGui.Button('Start race') then c:start_race() end
+		end
 	elseif phase == 'voting_weapon' or phase == 'voting_keepsake' then
 		self:draw_vote()
 	elseif phase == 'ready_check' then
@@ -137,7 +148,7 @@ function UI:draw_body()
 	elseif phase == 'finished' then
 		self:draw_result()
 		if st.rematch_requested then
-			self:colored(GREY, 'Rematch requested, waiting for opponent...')
+			self:colored(GREY, 'Rematch requested, waiting for the others...')
 		elseif ImGui.Button('Rematch') then
 			c:rematch()
 		end
@@ -157,7 +168,7 @@ function UI:draw_vote()
 		if v.mine == opt.id then label = '> ' .. label .. ' <' end
 		if ImGui.Button(label .. '##' .. opt.id) then self.client:vote(v.phase, opt.id) end
 	end
-	if v.opponent_voted then self:colored(GREY, 'Opponent has voted.') end
+	if v.of then self:colored(GREY, string.format('%d of %d voted.', v.voted or 0, v.of)) end
 end
 
 function UI:draw_ready(lobby)
@@ -218,19 +229,20 @@ function UI:draw_hud_body(race)
 		return
 	end
 	ImGui.Text('You  ' .. fmt_time(st.result and (race.completed and race.completed.time) or c:race_time()))
-	local opp = st.opponent
-	local name = c:opponent_name() or 'Opponent'
-	local fin = st.opponent_finished
-	if fin and not fin.victory then
-		self:colored(RED, name .. ': DEAD')
-	elseif not st.opponent_connected then
-		self:colored(RED, name .. ': DISCONNECTED')
-	else
-		self:colored(GREEN, name .. ': ALIVE')
-	end
-	if opp then
-		ImGui.Text(string.format('Room %s  depth %s', tostring(opp.room), tostring(opp.depth)))
-		ImGui.Text(string.format('HP %s/%s  time %s', tostring(opp.hp), tostring(opp.max_hp or '?'), fmt_time(opp.time)))
+	for _, r in ipairs(c:rivals()) do
+		local fin = r.finished
+		if fin then
+			self:colored(fin.victory and GREEN or RED, r.name .. (fin.victory and ': CLEARED' or ': OUT'))
+		elseif not r.connected then
+			self:colored(RED, r.name .. ': DISCONNECTED')
+		else
+			self:colored(GREEN, r.name .. ': ALIVE')
+		end
+		local opp = r.progress
+		if opp then
+			ImGui.Text(string.format('  Room %s  depth %s', tostring(opp.room), tostring(opp.depth)))
+			ImGui.Text(string.format('  HP %s/%s  time %s', tostring(opp.hp), tostring(opp.max_hp or '?'), fmt_time(opp.time)))
+		end
 	end
 	if st.result then self:draw_result() end
 end

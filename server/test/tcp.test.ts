@@ -18,6 +18,7 @@ describe("tcp transport + mock clients", () => {
       voteSeconds: 2,
       countdownMs: 300,
       raceTimeLimitMs: 60_000,
+      matchGatherMs: 200,
       reconnectGraceMs: 1000,
       idleLobbyMs: 60_000,
       pools: { weapon: TEST_WEAPONS, keepsake: TEST_KEEPSAKES },

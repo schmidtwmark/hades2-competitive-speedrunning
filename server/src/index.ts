@@ -13,6 +13,8 @@ const server = new RaceServer({
   raceTimeLimitMs: Number(env.RACE_TIME_LIMIT_MS ?? 3 * 60 * 60 * 1000),
   reconnectGraceMs: Number(env.RECONNECT_GRACE_MS ?? 60 * 1000),
   idleLobbyMs: Number(env.IDLE_LOBBY_MS ?? 30 * 60 * 1000),
+  maxPlayers: Number(env.MAX_PLAYERS ?? 5),
+  matchGatherMs: Number(env.MATCH_GATHER_MS ?? 15_000),
   pools: { weapon: WEAPONS, keepsake: KEEPSAKES },
   scheduler: realScheduler,
   random: realRandom,
