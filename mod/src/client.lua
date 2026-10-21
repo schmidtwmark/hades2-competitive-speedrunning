@@ -105,7 +105,8 @@ function Client:update()
 		if status == 'connected' and not self.hello_sent then
 			self.hello_sent = true
 			self.state.conn = 'connected'
-			self:send({ type = 'hello', name = self.name, version = self.version, token = self.state.token })
+			self:send({ type = 'hello', name = self.name, version = self.version, token = self.state.token,
+				game_build = self.game_build })
 		end
 		for _, line in ipairs(lines or {}) do
 			local ok, msg = pcall(self.json.decode, line)
@@ -135,11 +136,15 @@ end
 
 -- actions -----------------------------------------------------------------------
 
-function Client:create_lobby() return self:send({ type = 'create_lobby' }) end
+function Client:create_lobby()
+	self.state.mismatch = nil
+	return self:send({ type = 'create_lobby' })
+end
 
 -- create=true: if nobody has opened this code yet, open it and wait there,
 -- so two racers can both type a code they agreed on.
 function Client:join_lobby(code, create)
+	self.state.mismatch = nil
 	code = tostring(code or ''):upper():gsub('%s', '')
 	return self:send({ type = 'join_lobby', code = code, create = create or nil })
 end
@@ -148,6 +153,7 @@ function Client:leave_lobby() return self:send({ type = 'leave_lobby' }) end
 
 -- Quick match: the server pairs us with the next player who asks.
 function Client:find_match()
+	self.state.mismatch = nil
 	local ok = self:send({ type = 'find_match' })
 	if ok then self.state.queue = { since = self.now(), waiting = nil } end
 	return ok
@@ -309,6 +315,7 @@ end
 
 function handlers.lobby_joined(c, m)
 	c.state.queue = nil
+	c.state.mismatch = nil
 	c:_emit('lobby_joined', m)
 end
 
@@ -424,6 +431,11 @@ end
 
 function handlers.error(c, m)
 	c.state.last_error = { code = m.code, message = m.message, at = c.now() }
+	-- Can't race: this mod or this game (or the rival's) is out of date. Kept
+	-- until the player tries again, so the board can say who has to update.
+	if m.code == 'update_required' or m.code == 'version_mismatch' then
+		c.state.mismatch = { code = m.code, who = m.who, what = m.what, rival = m.rival, message = m.message }
+	end
 	c.log('server error ' .. tostring(m.code) .. ': ' .. tostring(m.message))
 	c:_emit('error', m)
 end

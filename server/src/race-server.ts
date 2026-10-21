@@ -21,6 +21,7 @@ import {
   type Outcome,
   type RunStats,
 } from "./protocol.js";
+import { type ClientVersions, compatibility, MIN_MOD_VERSION, type Mismatch, mismatchMessage, modTooOld, tooOldMessage } from "./versions.js";
 
 export interface Scheduler {
   now(): number;
@@ -51,6 +52,8 @@ export interface ServerOptions {
   /** How long a dropped player may reconnect before they leave / forfeit. */
   reconnectGraceMs: number;
   idleLobbyMs: number;
+  /** Oldest mod version accepted (default MIN_MOD_VERSION). */
+  minModVersion?: string;
   pools: { weapon: VoteOption[]; keepsake: VoteOption[] };
   scheduler: Scheduler;
   random: Random;
@@ -136,6 +139,7 @@ export class Session {
   conn: Connection | null = null;
   lobby: Lobby | null = null;
   graceTimer: unknown = null;
+  versions: ClientVersions = { mod: null, gameBuild: null };
 
   constructor(readonly id: string) {}
 
@@ -188,7 +192,7 @@ export class RaceServer {
     if (s.lobby) s.lobby.lastActivity = this.opts.scheduler.now();
     switch (msg.type) {
       case "hello":
-        return this.onHello(conn, msg.name, msg.token);
+        return this.onHello(conn, msg.name, msg.token, { mod: msg.version ?? null, gameBuild: msg.game_build ?? null });
       case "ping":
         return s.send({ type: "pong", t: msg.t ?? null, server_time: this.opts.scheduler.now() });
       case "create_lobby":
@@ -234,7 +238,7 @@ export class RaceServer {
 
   // ---------------------------------------------------------------- session
 
-  private onHello(conn: Connection, name: string, token?: string): void {
+  private onHello(conn: Connection, name: string, token: string | undefined, versions: ClientVersions): void {
     const s = conn.session;
     const prev = token ? this.byToken.get(token) : undefined;
     if (prev && prev !== s) {
@@ -250,8 +254,10 @@ export class RaceServer {
         this.opts.scheduler.clearTimeout(prev.graceTimer);
         prev.graceTimer = null;
       }
+      prev.versions = versions;
       this.log(`resume ${prev.id} (${prev.name})`);
       prev.send(this.welcome(prev, true));
+      this.warnIfOutdated(prev);
       const lobby = prev.lobby;
       if (lobby) {
         if (!stale) lobby.opponentOf(prev)?.send({ type: "opponent_reconnected" });
@@ -273,8 +279,10 @@ export class RaceServer {
     }
     s.name = name;
     s.greeted = true;
-    this.log(`hello ${s.id} name=${name}`);
+    s.versions = versions;
+    this.log(`hello ${s.id} name=${name} mod=${versions.mod ?? "?"} game=${versions.gameBuild ?? "?"}`);
     s.send(this.welcome(s, false));
+    this.warnIfOutdated(s);
   }
 
   private welcome(s: Session, resumed: boolean): ServerMessage {
@@ -318,6 +326,36 @@ export class RaceServer {
 
   // ---------------------------------------------------------------- lobbies
 
+  // ---------------------------------------------------------------- versions
+
+  private outdated(s: Session): boolean {
+    return modTooOld(s.versions.mod, this.opts.minModVersion ?? MIN_MOD_VERSION);
+  }
+
+  private warnIfOutdated(s: Session): boolean {
+    if (!this.outdated(s)) return false;
+    const min = this.opts.minModVersion ?? MIN_MOD_VERSION;
+    s.send({ type: "error", code: "update_required", who: "you", what: "mod", message: tooOldMessage(s.versions.mod, min) });
+    return true;
+  }
+
+  /** Tell both racers why they can't be paired and who has to update. */
+  private sendMismatch(a: Session, b: Session, m: Mismatch): void {
+    for (const [me, rival, side] of [[a, b, "a"], [b, a, "b"]] as const) {
+      const meOlder = m.older === side || m.older === "both";
+      const who = m.older === "both" ? "both" : meOlder ? "you" : "rival";
+      me.send({
+        type: "error",
+        code: "version_mismatch",
+        who,
+        what: m.what,
+        rival: rival.name,
+        message: mismatchMessage(m, me.versions, rival.versions, rival.name, meOlder),
+      });
+    }
+    this.log(`version mismatch ${a.id} ${JSON.stringify(a.versions)} vs ${b.id} ${JSON.stringify(b.versions)}: ${m.what}`);
+  }
+
   private newCode(): string {
     for (;;) {
       let code = "";
@@ -327,6 +365,7 @@ export class RaceServer {
   }
 
   private onCreate(s: Session, code = this.newCode()): void {
+    if (this.warnIfOutdated(s)) return;
     this.onCancelMatch(s, false);
     if (s.lobby) this.removeFromLobby(s, "forfeit");
     const lobby = new Lobby(code, this.opts.scheduler.now());
@@ -340,10 +379,16 @@ export class RaceServer {
 
   // Quick match: pair with whoever has waited longest, else wait in the queue.
   private onFindMatch(s: Session): void {
+    if (this.warnIfOutdated(s)) return;
     if (s.lobby) return this.error(s, "already_in_lobby", "Leave your lobby first");
     if (this.queue.includes(s)) return;
-    const partner = this.queue.find((p) => p !== s && p.connected);
+    const waiting = this.queue.filter((p) => p !== s && p.connected);
+    const partner = waiting.find((p) => !compatibility(s.versions, p.versions));
     if (!partner) {
+      // Someone is searching but can't be raced: say who has to update.
+      const other = waiting[0];
+      const m = other ? compatibility(s.versions, other.versions) : null;
+      if (other && m) this.sendMismatch(s, other, m);
       this.queue.push(s);
       this.log(`queue ${s.id} waiting (${this.queue.length})`);
       s.send({ type: "queued", waiting: this.queue.length });
@@ -370,6 +415,7 @@ export class RaceServer {
   }
 
   private onJoin(s: Session, code: string, create: boolean): void {
+    if (this.warnIfOutdated(s)) return;
     const lobby = this.lobbies.get(code);
     if (!lobby && create) {
       if (!isLobbyCode(code)) return this.error(s, "bad_code", `${code} is not a valid race code`);
@@ -378,6 +424,9 @@ export class RaceServer {
     if (!lobby) return this.error(s, "lobby_not_found", `Lobby ${code} not found`);
     if (lobby === s.lobby) return this.error(s, "already_in_lobby", "Already in this lobby");
     if (lobby.players.length >= 2) return this.error(s, "lobby_full", `Lobby ${code} is full`);
+    const host = lobby.players[0];
+    const m = host ? compatibility(s.versions, host.versions) : null;
+    if (host && m) return this.sendMismatch(s, host, m);
     this.onCancelMatch(s, false);
     if (s.lobby) this.removeFromLobby(s, "forfeit");
     lobby.players.push(s);

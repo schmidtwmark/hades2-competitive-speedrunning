@@ -47,7 +47,8 @@ export interface Ghost {
 }
 
 export type ClientMessage =
-  | { type: "hello"; name: string; version?: string; token?: string }
+  /** version: the mod's version; game_build: the Hades II executable's link time (Unix seconds). */
+  | { type: "hello"; name: string; version?: string; token?: string; game_build?: number }
   | { type: "create_lobby" }
   | { type: "find_match" }
   | { type: "cancel_match" }
@@ -152,7 +153,11 @@ export type ServerMessage =
       reason: ResultReason;
       results: RaceResultEntry[];
     }
-  | { type: "error"; message: string; code: string }
+  /**
+   * update_required: this client's mod is too old for the server.
+   * version_mismatch: can't race `rival`; `who` must update `what` ("you", "rival" or "both").
+   */
+  | { type: "error"; message: string; code: string; who?: "you" | "rival" | "both"; what?: "mod" | "game"; rival?: string }
   | { type: "pong"; t: number | null; server_time: number };
 
 export class ProtocolError extends Error {
@@ -234,7 +239,13 @@ export function parseClientMessage(raw: unknown): ClientMessage {
   const type = o.type;
   switch (type) {
     case "hello":
-      return { type, name: str(o, "name", 32), version: optStr(o, "version"), token: optStr(o, "token", 128) };
+      return {
+        type,
+        name: str(o, "name", 32),
+        version: optStr(o, "version"),
+        token: optStr(o, "token", 128),
+        game_build: optNum(o, "game_build"),
+      };
     case "create_lobby":
     case "find_match":
     case "cancel_match":

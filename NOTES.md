@@ -178,6 +178,17 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
 - **Recordings:** `scripts/record.sh NAME WINDOWS -- <test command>` records the game windows
   on the test PC (x11grab + VAAPI, wall-clock timestamps) and builds `local/videos/NAME.mp4`.
 
+## Version check
+
+The mod sends its version and the game build in `hello`; the game build is the running
+`Hades2.exe`'s PE link time, read from its header in memory (`rom.memory.get_module_base_address`,
+`e_lfanew` + 8): 1790167264 = 2026-09-23 on the tested build. The server (`server/src/versions.ts`)
+refuses mods older than `MIN_MOD_VERSION` (`update_required`) and pairs only racers with the same
+mod major.minor and the same game build (`version_mismatch` with `who`/`what`/`rival` to both, on
+join and in the Find Match queue); unknown values don't block (test tools). The board turns these
+into "Can't race X / Your Hades II is out of date / how to update". Verified in game with a mock
+rival claiming a newer build.
+
 ## Public server (Railway)
 
 Project `hades2-ranked-race`, service `race-server`, built from `server/Dockerfile`, listening on `::7777`

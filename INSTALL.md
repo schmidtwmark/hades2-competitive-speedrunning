@@ -75,6 +75,9 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
   clears it's a draw. If your rival clears first you can keep going to post your
   time. When both are done, a results screen compares the two runs.
 - The public race server is the default; nothing to configure.
+- **Both racers need matching versions:** the same Ranked Race release line
+  (e.g. any 0.3.x) and the same Hades II build. If they differ, the board says
+  "Can't race <name>" and who has to update what.
 
 ## Update
 
@@ -139,3 +142,6 @@ Follow these steps exactly; ask the human before anything not listed here.
 | Log has `signature not found` lines | The game updated; those features are off until the mod is updated. Report it. |
 | Title screen has no **Play Competitive Speedrun** | Same as above, or the launch went through a mod manager profile instead of Steam. |
 | Board says the race server is unreachable | Network/firewall; the server is `hopper.proxy.rlwy.net:16303` (TCP). |
+| Board: "This Ranked Race is out of date" | The server needs a newer mod: `git pull` (or a fresh ZIP) and run the installer again. |
+| Board: "Can't race X" / "Your Hades II is out of date" | Update Hades II in Steam (Library → Hades II → Update), restart the game. |
+| Board: "Can't race X" / "X's Ranked Race (or Hades II) is out of date" | Your rival has to update; search again afterwards. |

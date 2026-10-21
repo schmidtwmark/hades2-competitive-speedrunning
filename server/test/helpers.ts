@@ -90,8 +90,8 @@ export class TestClient {
     this.conn.receive(msg);
   }
 
-  hello(token?: string): string {
-    this.send({ type: "hello", name: this.name, ...(token ? { token } : {}) });
+  hello(token?: string, versions: { version?: string; game_build?: number } = {}): string {
+    this.send({ type: "hello", name: this.name, ...(token ? { token } : {}), ...versions });
     return this.last("welcome").token;
   }
 

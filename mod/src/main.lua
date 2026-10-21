@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.2.0'
+local VERSION = '0.3.0'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -101,6 +101,10 @@ local client = Client.new({
 	},
 })
 game.client = client
+-- Sent with hello: the server only pairs racers on the same Hades II build.
+client.game_build = game:game_build()
+local build_day = client.game_build and os and os.date and os.date('!%Y-%m-%d', client.game_build)
+log('game build ' .. tostring(client.game_build) .. (build_day and (' (' .. build_day .. ')') or ''))
 
 -- In-run opponent display: the shadow Melinoë and the native rival plate.
 local shadow = Shadow.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime })

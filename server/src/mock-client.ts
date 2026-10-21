@@ -28,6 +28,9 @@ export interface MockOptions {
   progressEvery: number;
   quiet: boolean;
   timeout: number;
+  /** Pretend to be this mod version / game build (default: unknown, which never blocks). */
+  version?: string;
+  gameBuild?: number;
 }
 
 export interface MockResult {
@@ -145,7 +148,9 @@ export function runMock(o: MockOptions): Promise<MockResult> {
     };
 
     let buf = "";
-    sock.on("connect", () => send({ type: "hello", name: o.name, version: "mock" }));
+    sock.on("connect", () =>
+      send({ type: "hello", name: o.name, version: o.version ?? "mock", ...(o.gameBuild ? { game_build: o.gameBuild } : {}) }),
+    );
     sock.on("data", (chunk: string) => {
       buf += chunk;
       let nl: number;
@@ -178,6 +183,8 @@ async function main() {
       "progress-every": { type: "string", default: "2" },
       timeout: { type: "string", default: "900" },
       quiet: { type: "boolean", default: false },
+      version: { type: "string" },
+      "game-build": { type: "string" },
     },
   });
   const outcome = values.outcome as MockOptions["outcome"];
@@ -198,6 +205,8 @@ async function main() {
     progressEvery: Number(values["progress-every"]),
     quiet: values.quiet!,
     timeout: Number(values.timeout),
+    version: values.version,
+    gameBuild: values["game-build"] ? Number(values["game-build"]) : undefined,
   });
   console.log(`RESULT: ${JSON.stringify(res)}`);
   process.exit(res.ok ? 0 : 1);

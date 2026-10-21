@@ -83,6 +83,27 @@ end
 
 -- In the hub, CurrentRun.CurrentRoom still names the last run room; the hub
 -- map lives in CurrentHubRoom (set on arrival, cleared by StartOver).
+-- The running Hades II build: the game executable's PE link time (Unix
+-- seconds), read from its header in memory. Every Steam player on a build has
+-- the same binary (Proton runs the Windows one), so equal values mean the same
+-- game; a larger one is newer. nil if it can't be read (then nothing blocks).
+function Game:game_build()
+	local _ = _ENV -- rom.memory finds the calling mod through _ENV
+	local mem = self.rom and self.rom.memory
+	if not (mem and mem.get_module_base_address) then return nil end
+	local ok, stamp = pcall(function()
+		local _ = _ENV
+		local base = mem.get_module_base_address()
+		if not base or base:is_null() then return nil end
+		local pe = base:add(base:add(0x3C):get_dword())
+		if pe:get_dword() ~= 0x4550 then return nil end -- "PE\0\0"
+		return pe:add(8):get_dword() -- IMAGE_FILE_HEADER.TimeDateStamp
+	end)
+	if ok and type(stamp) == 'number' and stamp > 0 then return stamp end
+	self.log('game: could not read the game build: ' .. tostring(stamp))
+	return nil
+end
+
 function Game:current_map()
 	local hub = self.G.CurrentHubRoom
 	if hub and hub.Name then return hub.Name end

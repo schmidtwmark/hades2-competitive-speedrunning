@@ -95,6 +95,26 @@ function Board.compare(me, them)
 	return out
 end
 
+-- Lines for "can't race": who has to update what, and how.
+function Board.mismatch_lines(m)
+	local rival = Board.safe(m.rival or 'your rival')
+	local thing = m.what == 'game' and 'Hades II' or 'Ranked Race'
+	local how = m.what == 'game' and 'Update it in Steam: Library -> Hades II -> Update.'
+		or 'Update it: git pull in the mod folder, then run the installer again.'
+	if m.code == 'update_required' then
+		return { { text = 'This Ranked Race is out of date', color = RED },
+			{ text = 'It can no longer race on this server.' }, { text = how, color = GREY } }
+	end
+	local head = { text = "Can't race " .. rival, color = RED }
+	if m.who == 'you' then
+		return { head, { text = 'Your ' .. thing .. ' is out of date.' }, { text = how, color = GREY } }
+	elseif m.who == 'rival' then
+		return { head, { text = rival .. "'s " .. thing .. ' is out of date.' },
+			{ text = 'Search again once they have updated.', color = GREY } }
+	end
+	return { head, { text = 'Your ' .. thing .. ' versions differ.' }, { text = 'Both of you: update to the latest.', color = GREY } }
+end
+
 -- Page description for the current state. `ui` is the board's own state
 -- (page, typed code); `names(id)` gives display names.
 function Board.view(c, ui, now, names)
@@ -133,7 +153,12 @@ function Board.view(c, ui, now, names)
 	if not lobby then
 		if st.queue then
 			d.id, d.title = 'queue', 'Finding a Rival'
-			line('Searching for another racer...')
+			if st.mismatch then
+				for _, l in ipairs(Board.mismatch_lines(st.mismatch)) do line(l.text, l.color) end
+				d.id = 'queue:mismatch'
+			else
+				line('Searching for another racer...')
+			end
 			line('Waiting ' .. fmt_clock(now - (st.queue.since or now)):gsub('%.%d+$', ''), GREY)
 			button('cancel_search', 'Cancel Search', 'cancel_queue')
 			d.cancel = { action = 'cancel_queue', label = '{CN} Cancel' }
@@ -157,9 +182,14 @@ function Board.view(c, ui, now, names)
 		end
 		d.id, d.title = 'home', 'Competitive Speedrun'
 		line('Racing as ' .. Board.safe(c.name))
-		line('Same seed, same rooms, same foes. First to clear wins.', GREY)
-		local err = st.last_error
-		if err and now - (err.at or 0) < 10 then line(err.message or err.code, RED) end
+		if st.mismatch then
+			for _, l in ipairs(Board.mismatch_lines(st.mismatch)) do line(l.text, l.color) end
+			d.id = 'home:mismatch'
+		else
+			line('Same seed, same rooms, same foes. First to clear wins.', GREY)
+			local err = st.last_error
+			if err and now - (err.at or 0) < 10 then line(err.message or err.code, RED) end
+		end
 		button('find', 'Find Match', 'find')
 		button('create', 'Create Private Race', 'create')
 		button('join_page', 'Race by Code', 'join_page')
@@ -246,7 +276,8 @@ end
 
 -- Pages that need the player: the board opens itself for these in the hub.
 function Board.wants_attention(id)
-	return id ~= nil and (id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil)
+	return id ~= nil and (id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
+		or id:find(':mismatch$') ~= nil)
 end
 
 -- actions (shared by controller presses and the test bot) ---------------------
