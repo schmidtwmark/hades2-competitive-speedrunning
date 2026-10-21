@@ -1,8 +1,8 @@
 {
   "name": "RankedRace",
-  "version_number": "0.1.0",
+  "version_number": "0.2.0",
   "website_url": "",
-  "description": "1v1 seeded races: same seed, weapon and keepsake, live opponent HUD.",
+  "description": "1v1 Hades II races: same seed, rooms and foes; native race board, rival plate and shadow, controller-first.",
   "dependencies": [
     "Hell2Modding-Hell2Modding-1.0.117",
     "SGG_Modding-ModUtil-4.0.1"

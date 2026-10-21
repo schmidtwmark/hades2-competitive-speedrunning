@@ -1,0 +1,11 @@
+# Pinned dependencies (the exact set the mod is tested with).
+# <namespace>-<name> <version> <sha256 of the Thunderstore zip>
+# Download URL: https://thunderstore.io/package/download/<namespace>/<name>/<version>/
+Hell2Modding-Hell2Modding 1.0.117 d1c8a0b4b335c2f2c8ecab71428603328a2abd7c11ae4a77e0108da40e27b2d2
+LuaENVY-ENVY 1.2.1 e21e1aaff9b04b7243dd5d767576ca8f07916c3f67847cbc9dc5e26550dcb5cd
+SGG_Modding-ENVY 1.2.1 6248ab35de517678bcf1927ca1b301780c3bc5f9e6d243a944f8206cd5dc8660
+SGG_Modding-Chalk 2.1.2 b4951d814939aaa66a669f01cc1744ddeee9697818229824ecf6bee0b647de15
+SGG_Modding-ReLoad 1.0.3 6829c70e0859144d6cf37549df49b6b30c44142176bf540f36c8db020a317a2c
+SGG_Modding-SJSON 1.0.3 240745aa55fe0353d87e09f04192d5ea7c9cd16c9811e6dd33857aac22140c25
+SGG_Modding-DemonDaemon 1.1.1 c7d2a3550aba2471801407a4a86612dfd941967411ed722981b651d6b837d437
+SGG_Modding-ModUtil 4.0.1 74f402cd3ac5d6fe62d0b5b88ef49ac3a7c2b20820ce607813b29a0c224059fb

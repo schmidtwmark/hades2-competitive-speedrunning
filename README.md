@@ -19,18 +19,10 @@ and both boon lists.
 
 ## Play
 
-1. Install [Hell2Modding](https://thunderstore.io/c/hades-ii/p/Hell2Modding/Hell2Modding/) and
-   [ModUtil](https://thunderstore.io/c/hades-ii/p/SGG_Modding/ModUtil/) (r2modman or Gale does this),
-   then copy `mod/src/` into `ReturnOfModding/plugins/schmidtwmark-RankedRace/`.
-2. On the title screen pick **Play Competitive Speedrun**. You arrive at the Crossroads and the
-   **Race Board** opens (later, walk to the Pitch-Black Stone and press Interact: "Race"):
-   - **Find Match** pairs you with the next player who also picks it.
-   - **Create Private Race** gives you a 4-character code to share.
-   - **Race by Code** types a code with the on-screen keys: your rival's code, or any code you two
-     agreed on (the first to enter it opens the race, the second joins).
-3. Vote on weapon and keepsake (icons, D-pad + A). Close the board with B to set your Arcana,
-   familiar and aspect, come back to the stone, press **Ready**; a 3-2-1 countdown starts the run
-   for both of you. Afterwards the board shows the result with **Rematch**.
+See **[INSTALL.md](INSTALL.md)**: one script per system (Windows, Linux / Steam
+Deck) installs the mod loader, its dependencies and the mod; then set one Steam
+launch option and pick **Play Competitive Speedrun** on the title screen. It also
+has step-by-step instructions for an AI agent installing it for you.
 
 Competitive mode gives both players the same fully maxed profile (every weapon, aspect, keepsake,
 familiar and Arcana card at max rank, Grasp 30, Fear 0) built in memory; it never reads or writes
