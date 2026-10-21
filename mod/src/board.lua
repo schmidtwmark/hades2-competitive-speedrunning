@@ -55,6 +55,36 @@ function Board.safe(name)
 	return (tostring(name or '?'):gsub('[{}@]', ''))
 end
 
+-- Chat: one-press lines, and the on-screen keyboard's keys (Aa toggles case).
+Board.QUICK_LINES = { 'GG', 'Good luck!', 'Nice!', 'Oops', 'Well played', 'Rematch?', "I'm using tilt controls",
+	"I'm a little nervous" }
+
+-- First-open welcome (and the home page's About): spoilers first, then what the
+-- mod is, then how it was made.
+Board.REPO = 'github.com/schmidtwmark/hades2-ranked-race'
+-- Lines stay under ~60 characters: longer ones wrap onto the next line.
+Board.WELCOME_LINES = {
+	{ 'Spoilers ahead: a 100% completed save', 'gold' },
+	{ 'Competitive mode uses a fully completed profile:' },
+	{ 'the whole story, every god, weapon and upgrade.' },
+	{ 'Menus and runs can spoil story and late-game content.' },
+	{ 'Your own save is never loaded, changed or used.', 'grey' },
+	{ 'Race 2-5 players on one seed: same rooms, foes and offers.' },
+	{ 'Vote on route, weapon and keepsake, prep 2 minutes, race.' },
+	{ 'AI disclosure: this mod was developed with AI', 'grey' },
+	{ '(Claude, by Anthropic). It is fully open source:', 'grey' },
+	{ Board.REPO, 'grey' },
+}
+Board.CHAT_KEYS = "abcdefghijklmnopqrstuvwxyz0123456789!?.,'-"
+Board.CHAT_MAX = 60
+
+-- Where each route starts in the Crossroads (using it marks you ready).
+Board.ROUTE_START = { underworld = 'the stairs down', surface = 'the path to the Surface', dream = 'the Dream Dive' }
+Board.ROUTE_NAMES = { underworld = 'Underworld', surface = 'Surface', dream = 'Dream Dive' }
+
+-- Biome name for a room name; main.lua plugs in the rival plate's (Hud.biome_name).
+function Board.biome() return nil end
+
 function Board.code_slots(code)
 	local out = {}
 	for i = 1, Board.CODE_LENGTH do
@@ -179,7 +209,57 @@ function Board.view(c, ui, now, names)
 		d.buttons[#d.buttons + 1] = { key = key, label = label, action = action or key, arg = arg }
 	end
 
-	-- In-run prompt from the pause menu's "Forfeit Race" (or Quit).
+	-- Recent chat lines, for the chat pages.
+	local function recent_chat(n)
+		local chat = st.chat or {}
+		for i = math.max(1, #chat - n + 1), #chat do
+			local m = chat[i]
+			line((m.mine and 'You' or Board.safe(m.name)) .. ':  ' .. Board.safe(m.text), GREY)
+		end
+	end
+	-- The pause menu's "Race Menu" (in a run): chat or forfeit.
+	if ui.prompt == 'race' then
+		d.id, d.title = 'prompt:race', 'Race Menu'
+		line('Message the race, or give up your run.', GREY)
+		button('chat', 'Chat', 'chat')
+		button('forfeit', 'Forfeit Race', 'race_forfeit')
+		button('keep', 'Back to the Race', 'prompt_cancel')
+		d.focus = 'keep'
+		d.cancel = { action = 'prompt_cancel', label = '{CN} Back' }
+		return d
+	end
+	if ui.prompt == 'chat' then
+		d.id, d.title = 'prompt:chat:' .. #(st.chat or {}), 'Chat'
+		if #(st.chat or {}) == 0 then line('Say something to everyone in the race.', GREY) else recent_chat(3) end
+		d.grid = { kind = 'words', cols = 2, items = {} }
+		for i, text in ipairs(Board.QUICK_LINES) do
+			d.grid.items[#d.grid.items + 1] = { key = 'say_' .. i, label = text, action = 'say', arg = text }
+		end
+		button('type', 'Type a Message', 'chat_type')
+		button('back', 'Back', 'chat_back')
+		d.focus = 'say_1'
+		d.cancel = { action = 'chat_back', label = '{CN} Back' }
+		return d
+	end
+	if ui.prompt == 'chat_type' then
+		local text = ui.chat_text or ''
+		d.id, d.title = 'prompt:chat_type:' .. tostring(ui.chat_caps) .. ':' .. tostring(#text > 0), 'Type a Message'
+		line(text ~= '' and (Board.safe(text) .. '_') or '_', GOLD)
+		line('B deletes. Up to ' .. Board.CHAT_MAX .. ' characters.', GREY)
+		d.grid = { kind = 'keys', cols = 11, items = {} }
+		for ch in Board.CHAT_KEYS:gmatch('.') do
+			local shown = ui.chat_caps and ch:upper() or ch
+			d.grid.items[#d.grid.items + 1] = { key = 'chr_' .. ch, label = shown, action = 'chat_key', arg = shown }
+		end
+		d.grid.items[#d.grid.items + 1] = { key = 'chr_space', label = 'Space', action = 'chat_key', arg = ' ' }
+		d.grid.items[#d.grid.items + 1] = { key = 'chr_caps', label = 'Aa', action = 'chat_caps' }
+		if #text > 0 then button('send', 'Send', 'chat_send') end
+		button('back', 'Back', 'chat_type_back')
+		d.focus = 'chr_a'
+		d.cancel = { action = 'chat_backspace', label = #text > 0 and '{CN} Delete' or '{CN} Back' }
+		return d
+	end
+	-- In-run prompt from the race menu's Forfeit Race (or the pause menu's Quit).
 	if ui.prompt == 'forfeit' then
 		local rivals = c:rivals()
 		local dec = st.decided
@@ -196,6 +276,17 @@ function Board.view(c, ui, now, names)
 		button('keep', 'Keep Racing', 'prompt_cancel')
 		d.focus = 'keep'
 		d.cancel = { action = 'prompt_cancel', label = '{CN} Keep Racing' }
+		return d
+	end
+
+	-- First open (and About): what this is, spoilers and the AI disclosure.
+	if ui.welcome then
+		d.id, d.title = 'welcome', 'Welcome to Ranked Race'
+		for _, l in ipairs(Board.WELCOME_LINES) do
+			line(l[1], l[2] == 'gold' and GOLD or (l[2] == 'grey' and GREY or nil))
+		end
+		button('continue', 'Continue', 'welcome_done')
+		d.cancel = { action = 'welcome_done', label = '{CN} Continue' }
 		return d
 	end
 
@@ -248,6 +339,7 @@ function Board.view(c, ui, now, names)
 		button('find', 'Find Match', 'find')
 		button('create', 'Create Private Race', 'create')
 		button('join_page', 'Race by Code', 'join_page')
+		button('about', 'About', 'about')
 		return d
 	end
 
@@ -273,6 +365,16 @@ function Board.view(c, ui, now, names)
 		end
 		return out
 	end
+	-- Who has voted, and the time left.
+	local function vote_status(v, left)
+		if #rivals == 1 then
+			line('vs ' .. opp .. '   -   ' .. left .. 's left')
+			line((v.voters or {})[rivals[1].id] and (opp .. ' has voted.') or (opp .. ' is choosing...'), GREY)
+		else
+			line((#rivals + 1) .. ' racers   -   ' .. left .. 's left')
+			line((v.voted or 0) .. ' of ' .. (v.of or #rivals + 1) .. ' have voted. Most votes wins.', GREY)
+		end
+	end
 	if phase == 'waiting' and lobby.public then
 		-- Find Match: more racers can join until the setup starts by itself.
 		local n, alone = #players, #players < 2
@@ -293,6 +395,7 @@ function Board.view(c, ui, now, names)
 			line('Waiting ' .. fmt_clock(now - (st.search_since or now)):gsub('%.%d+$', ''), GREY)
 		end
 		button('cancel_search', 'Cancel Search', 'cancel_queue')
+		if n >= 2 then button('chat', 'Chat', 'chat') end
 		d.cancel = { action = 'cancel_queue', label = '{CN} Cancel' }
 	elseif phase == 'waiting' then
 		local n, host = #players, c:is_host()
@@ -311,19 +414,27 @@ function Board.view(c, ui, now, names)
 		else
 			line('Waiting for a rival to join...')
 		end
+		if n >= 2 then button('chat', 'Chat', 'chat') end
 		button('leave', 'Leave Race', 'leave')
+	elseif phase == 'voting_route' then
+		-- Where the run goes: a column of text buttons (no icons for routes).
+		local v = st.vote or { options = {} }
+		d.title = 'Vote: Route'
+		local left = math.max(0, math.ceil((v.deadline or now) - now))
+		vote_status(v, left)
+		for _, o in ipairs(v.options or {}) do
+			button('opt_' .. o.id, (v.mine == o.id and '> ' or '') .. (o.name or o.id) .. (v.mine == o.id and ' <' or ''),
+				'vote', o.id)
+		end
+		button('leave', 'Leave Race', 'leave')
+		d.focus = v.mine and ('opt_' .. v.mine) or (d.buttons[1] and d.buttons[1].key)
+		d.id = 'vote_route:' .. #(v.options or {}) .. ':' .. tostring(v.mine)
 	elseif phase == 'voting_weapon' or phase == 'voting_keepsake' then
 		local kind = phase == 'voting_weapon' and 'weapon' or 'keepsake'
 		local v = st.vote or { options = {} }
 		d.title = kind == 'weapon' and 'Vote: Weapon' or 'Vote: Keepsake'
 		local left = math.max(0, math.ceil((v.deadline or now) - now))
-		if #rivals == 1 then
-			line('vs ' .. opp .. '   -   ' .. left .. 's left')
-			line((v.voters or {})[rivals[1].id] and (opp .. ' has voted.') or (opp .. ' is choosing...'), GREY)
-		else
-			line((#rivals + 1) .. ' racers   -   ' .. left .. 's left')
-			line((v.voted or 0) .. ' of ' .. (v.of or #rivals + 1) .. ' have voted. Most votes wins.', GREY)
-		end
+		vote_status(v, left)
 		d.grid = { kind = kind, cols = kind == 'weapon' and 6 or 11, items = {} }
 		local keys = {}
 		for _, o in ipairs(v.options or {}) do
@@ -344,9 +455,17 @@ function Board.view(c, ui, now, names)
 		local not_ready = waiting_on(function(p) return p.ready end)
 		local w = st.vote_results.weapon and st.vote_results.weapon.selected
 		local k = st.vote_results.keepsake and st.vote_results.keepsake.selected
+		local route = st.vote_results.route and st.vote_results.route.selected
 		d.id, d.title = 'ready:' .. tostring(me_ready), 'Ready to Race'
 		line((w and names(w) or '?') .. '   +   ' .. (k and names(k) or '?'), GOLD)
-		line('Set your Arcana, familiar and aspect here first.', GREY)
+		local prep = c:prep_left()
+		local start = Board.ROUTE_START[route] or 'the exit'
+		if me_ready then
+			line('You are ready. The race starts when everyone is' .. (prep and (', or in ' .. fmt_clock(prep):gsub('%.%d+$', '')) or '') .. '.', GREY)
+		else
+			line('Set your Arcana, familiar and aspect, then use ' .. start .. '.', GREY)
+			if prep then line('Starting anyway in ' .. fmt_clock(prep):gsub('%.%d+$', ''), GOLD) end
+		end
 		if #not_ready > 0 then
 			line('Waiting for ' .. Board.join_names(not_ready) .. '...', GREY)
 		else
@@ -354,16 +473,25 @@ function Board.view(c, ui, now, names)
 		end
 		d.show = { { kind = 'weapon', id = w }, { kind = 'keepsake', id = k } }
 		if not me_ready then button('ready', 'Ready', 'ready') end
+		button('chat', 'Chat', 'chat')
 		button('leave', 'Leave Race', 'leave')
 	elseif phase == 'countdown' then
 		d.id, d.title = 'countdown', 'Get Ready'
 		line('The race is starting.')
 		d.close = true
 	elseif phase == 'racing' then
-		-- Back in the hub while rivals are still running (after a clear or a DNF).
+		-- Back in the hub while rivals are still running (after a clear or a DNF):
+		-- your result, then everyone still out there, live.
 		local dec, mine = st.decided, st.race and st.race.completed
-		d.title = dec and (dec.you_won and 'Victory' or 'Defeat') or 'Race in Progress'
-		d.title_color = dec and (dec.you_won and GREEN or RED) or nil
+		local my_depth = st.my_progress and st.my_progress.depth
+		d.title = dec and (dec.you_won and 'Victory' or 'Defeat') or (mine and not mine.victory and 'Out of the Race')
+			or 'Race in Progress'
+		d.title_color = dec and (dec.you_won and GREEN or RED) or (mine and not mine.victory and RED) or nil
+		if mine then
+			local word = mine.victory and 'You cleared' or (mine.forfeit and 'You forfeited' or 'You fell')
+			local at = (not mine.victory and my_depth) and (' at depth ' .. my_depth) or ''
+			line(word .. at .. '   ' .. fmt_clock(mine.time), mine.victory and GREEN or RED)
+		end
 		if dec and dec.you_won then
 			line('You cleared first.', GREEN)
 		elseif dec and not dec.draw and dec.winner_name then
@@ -374,12 +502,17 @@ function Board.view(c, ui, now, names)
 			if not r.finished then
 				running = running + 1
 				local p = r.progress
-				line(Board.safe(r.name) .. ' is still running' .. (p and p.depth and (': depth ' .. p.depth) or '') .. '.')
+				local biome = p and Board.biome(p.room)
+				local where = p and p.depth and ('depth ' .. p.depth .. (biome and ('  ' .. biome) or '')) or 'starting'
+				local hp = p and p.hp and ('   ' .. math.ceil(p.hp) .. '/' .. math.ceil(p.max_hp or p.hp) .. ' HP') or ''
+				line(Board.safe(r.name) .. ':  ' .. where .. hp)
 			end
 		end
 		line(running > 1 and 'The full results appear when everyone finishes.' or 'The full results appear when they finish.',
 			GREY)
-		d.id = 'racing:' .. tostring(dec and dec.you_won) .. ':' .. tostring(mine and mine.forfeit) .. ':' .. #d.lines
+		button('chat', 'Chat', 'chat')
+		local state = mine and (mine.victory and 'cleared' or (mine.forfeit and 'forfeit' or 'fell')) or 'running'
+		d.id = 'racing:' .. tostring(dec and dec.you_won) .. ':' .. state .. ':' .. #d.lines
 	elseif phase == 'finished' then
 		local r = st.result or {}
 		d.id = 'finished:' .. tostring(st.rematch_requested)
@@ -402,6 +535,7 @@ function Board.view(c, ui, now, names)
 		else
 			button('rematch', 'Rematch', 'rematch')
 		end
+		button('chat', 'Chat', 'chat')
 		button('leave', 'Leave Race', 'leave')
 	else
 		d.id, d.title = 'phase:' .. tostring(phase), 'Competitive Speedrun'
@@ -414,8 +548,10 @@ function Board.wants_attention(id)
 	if id == nil then return false end
 	-- A private lobby's host, once someone joins: Start Race is up to them.
 	local joined = tonumber(id:match('^waiting:(%d+):true$'))
-	return id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
-		or id:find(':mismatch$') ~= nil or (joined ~= nil and joined >= 2)
+	-- Your run is over while others race on: your result and their progress.
+	local out = id:match("^racing:[^:]*:(%a+):")
+	return id == 'welcome' or id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
+		or id:find(':mismatch$') ~= nil or (joined ~= nil and joined >= 2) or (out ~= nil and out ~= 'running')
 end
 
 -- actions (shared by controller presses and the test bot) ---------------------
@@ -467,6 +603,40 @@ function Board:act(action, arg)
 		c:rematch()
 	elseif action == 'leave' then
 		c:leave_lobby()
+	elseif action == 'welcome_done' then
+		ui.welcome = false
+		if self.on_welcome_seen then pcall(self.on_welcome_seen) end
+	elseif action == 'about' then
+		ui.welcome = true
+	elseif action == 'chat' then
+		ui.chat_from = ui.prompt
+		ui.prompt = 'chat'
+	elseif action == 'say' or action == 'chat_send' then
+		local text = action == 'say' and arg or ui.chat_text
+		if text and text ~= '' then c:chat(text) end
+		ui.chat_text = ''
+		-- In a run, straight back to the game; in the Crossroads, back to the page.
+		if ui.chat_from == 'race' then
+			ui.prompt = nil
+			self:close()
+		else
+			ui.prompt = ui.chat_from
+		end
+	elseif action == 'chat_back' then
+		ui.prompt = ui.chat_from
+		if ui.prompt == nil and self.in_run then self:close() end
+	elseif action == 'chat_type' then
+		ui.prompt, ui.chat_text = 'chat_type', ''
+	elseif action == 'chat_type_back' then
+		ui.prompt = 'chat'
+	elseif action == 'chat_key' then
+		if #(ui.chat_text or '') < Board.CHAT_MAX then ui.chat_text = (ui.chat_text or '') .. arg end
+	elseif action == 'chat_caps' then
+		ui.chat_caps = not ui.chat_caps
+	elseif action == 'chat_backspace' then
+		if #(ui.chat_text or '') > 0 then ui.chat_text = ui.chat_text:sub(1, -2) else ui.prompt = 'chat' end
+	elseif action == 'race_forfeit' then
+		ui.prompt = 'forfeit'
 	elseif action == 'forfeit_confirm' then
 		ui.prompt = nil
 		if self.game and self.game.forfeit_now then self.game:forfeit_now() end
@@ -600,26 +770,33 @@ function Board:render(d)
 		top = self:render_table(d.table, cx, top)
 	elseif d.grid then
 		local g, n = d.grid, #d.grid.items
-		local step_x = g.kind == 'weapon' and 150 or (g.kind == 'keys' and 96 or 104)
-		local step_y = g.kind == 'keys' and 90 or 118
+		local words = g.kind == 'words' -- text buttons (chat lines)
+		local step_x = words and 420 or (g.kind == 'weapon' and 150 or (g.kind == 'keys' and 96 or 104))
+		local step_y = words and 84 or (g.kind == 'keys' and 90 or 118)
 		local cols = math.min(g.cols, n)
 		local x0 = cx - (cols - 1) * step_x / 2
 		local y0 = top + (g.kind == 'weapon' and 60 or 50)
 		-- Behind the buttons, like the Keepsake rack's cursor frame.
-		self:component('HoverFrame', { Name = 'BlankObstacle', X = -1000, Y = -1000, Group = BACK_GROUP,
-			Animation = 'AwardMenuCursorHighlight', Scale = g.kind == 'keys' and 0.7 or 1 })
+		if not words then
+			self:component('HoverFrame', { Name = 'BlankObstacle', X = -1000, Y = -1000, Group = BACK_GROUP,
+				Animation = 'AwardMenuCursorHighlight', Scale = g.kind == 'keys' and 0.7 or 1 })
+		end
 		for i, item in ipairs(g.items) do
 			local col, row = (i - 1) % g.cols, math.floor((i - 1) / g.cols)
 			local x, y = x0 + col * step_x, y0 + row * step_y
 			local scale = g.kind == 'weapon' and 0.85 or 0.55 -- aspect art is smaller than keepsake art
-			local comp = self:component(item.key, { Name = 'ButtonKeepsakeItem', X = x, Y = y, Scale = scale })
+			local comp = self:component(item.key, words and { Name = 'ButtonDefault', X = x, Y = y, Scale = 1.0 }
+				or { Name = 'ButtonKeepsakeItem', X = x, Y = y, Scale = scale })
 			comp.Action, comp.Arg, comp.Label = item.action, item.arg, item.label
 			comp.Sound = '/SFX/Menu Sounds/GeneralWhooshMENU'
 			comp.OnMouseOverFunctionName, comp.OnMouseOffFunctionName = 'RankedRace_BoardHover', 'RankedRace_BoardUnhover'
 			G.AttachLua({ Id = comp.Id, Table = comp })
-			if g.kind == 'keys' then
+			if words then
+				G.CreateTextBox(text_args(comp.Id, item.label, 'P22UndergroundSCMedium', 24, { 254, 255, 255, 255 },
+					{ Width = 380, OutlineThickness = 0, ShadowColor = { 0, 0, 0, 0 }, ShadowOffset = { 0, 3 } }))
+			elseif g.kind == 'keys' then
 				G.SetAnimation({ Name = 'Keepsake_BackingMenu', DestinationId = comp.Id })
-				G.CreateTextBox(text_args(comp.Id, item.label, 'P22UndergroundSCMedium', 40, BODY))
+				G.CreateTextBox(text_args(comp.Id, item.label, 'P22UndergroundSCMedium', #item.label > 1 and 22 or 40, BODY))
 			else
 				local icon = self:icon_for(g.kind, item.icon)
 				if icon then G.SetAnimation({ Name = icon, DestinationId = comp.Id }) end
@@ -631,8 +808,8 @@ function Board:render(d)
 			if item.key == d.focus then focus_id = comp.Id end
 		end
 		local rows = math.ceil(n / g.cols)
-		self:label('HoverLabel', cx, y0 + rows * step_y - 10, ' ', 'P22UndergroundSCMedium', 28, GOLD)
-		top = y0 + rows * step_y + 50
+		if not words then self:label('HoverLabel', cx, y0 + rows * step_y - 10, ' ', 'P22UndergroundSCMedium', 28, GOLD) end
+		top = y0 + rows * step_y + (words and 0 or 50)
 	elseif d.show then
 		local x0 = cx - 90
 		for i, s in ipairs(d.show) do
@@ -950,11 +1127,34 @@ function Board:update(in_hub)
 	if not ok then self:fail('updating', err) end
 end
 
+-- While the board is closed in the competitive hub, a line at the bottom of
+-- the screen says where it is (players who close it otherwise lose it).
+Board.HINT_TEXT = 'Race Board: {I} at the Pitch-Black Stone'
+function Board:update_hint(show)
+	local G, ms = self.G, self.G.MapState
+	if not ms then return end
+	local id = ms.RankedRaceBoardHint
+	if show and not id then
+		id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = 'Combat_Menu_TraitTray_Overlay',
+			X = G.ScreenCenterX or 960, Y = (G.ScreenHeight or 1080) - 54 })
+		G.CreateTextBox(text_args(id, Board.HINT_TEXT, 'LatoMedium', 22, GREY, { Width = 900 }))
+		ms.RankedRaceBoardHint = id
+		self.hint_shown = nil
+	end
+	if id and self.hint_shown ~= show then
+		self.hint_shown = show
+		G.SetAlpha({ Id = id, Fraction = show and 1 or 0, Duration = 0.2 })
+	end
+end
+
 function Board:tick(in_hub)
 	if in_hub then self:patch_stone() end
-	if self.ui.prompt == 'forfeit' and self.game and self.game.forfeit_available and not self.game:forfeit_available() then
+	self:update_hint(in_hub and not self:is_open() and not self:other_screen_open() and self:input_allowed())
+	local p = self.ui.prompt
+	if (p == 'forfeit' or p == 'race') and self.game and self.game.forfeit_available and not self.game:forfeit_available() then
 		self.ui.prompt = nil -- the run ended meanwhile
 	end
+	self.in_run = not in_hub
 	local d = Board.view(self.client, self.ui, self.now(), self.names)
 	local here = in_hub or self.ui.prompt ~= nil
 	if self:is_open() then

@@ -28,7 +28,27 @@ local KEEPSAKE_LEVEL = 3
 local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', 'StartRoom', 'KillHero', 'RecordRunCleared',
 	'EquipKeepsake', 'DoUnlockRoomExits', 'StartNewGame', 'RequestSave', 'DeathAreaSwitchRoom', 'ValidateCheckpoint',
 	'InvalidateCheckpoint', 'LeaveRoom', 'RandomSetNextInitSeed', 'ChooseEncounter', 'RunShopGeneration', 'ChooseNextRoomData',
-	'CreateRoom', 'ChooseRoomReward', 'GetNextSpawn', 'HandleNextSpawn', 'Load', 'CloseRunClearScreen' }
+	'CreateRoom', 'ChooseRoomReward', 'GetNextSpawn', 'HandleNextSpawn', 'Load', 'CloseRunClearScreen',
+	'HandleUpgradeChoiceSelection', 'HandleStorePurchase', 'UseEscapeDoor', 'UseDreamRunDoor', 'SelectNextDreamBiome',
+	'UnlockAchievement', 'CheckProgressAchievements', 'CheckAchievement', 'ChooseLoot', 'FillInShopOptions',
+	'SetTraitsOnLoot', 'HandleBreakableSwap', 'CheckMoneyDrop', 'ProcessObjectValueOptions',
+	'CheckChallengeSwitchItemValidity', 'CheckPlayerOnFirePowers', 'ChooseSpell', 'CreateSpellButtons' }
+
+-- Shadow animations for hero actions whose fire graphic isn't the visible move.
+local ACTION_ANIMS = { WeaponBlink = 'MelinoeDashStart', WeaponSprint = 'MelinoeSprint' }
+
+-- Race routes (server/src/pools.ts ids): the Crossroads door that starts each
+-- (DeathLoopData Hub_PreRun ObstacleData) and what it passes to StartOver.
+local ROUTES = {
+	underworld = { door = 420947, label = 'the stairs down', start = function() return { StartingBiome = 'F' } end },
+	surface = { door = 555784, label = 'the path to the Surface',
+		start = function() return { StartingBiome = 'N', RandomOffset = 1 } end },
+	dream = { door = 780651, label = 'the Dream Dive', dream = true,
+		start = function()
+			return { StartingRoomName = 'Dream_Intro', RunOverrides = { IsDreamRun = true, BiomeDepthCache = 1 } }
+		end },
+}
+Game.ROUTES = ROUTES
 
 function Game.new(deps)
 	local g = setmetatable({}, Game)
@@ -130,6 +150,13 @@ end
 function Game:race_run_live()
 	local r = self.race
 	return r ~= nil and r.run ~= nil and r.run == self.G.CurrentRun and not r.finished
+end
+
+-- One line in this race's choice log (racelog.lua); never breaks the game.
+function Game:rlog(ev, fields)
+	local rl = self.racelog
+	if not (rl and self.race and self.race.run == self.G.CurrentRun) then return end
+	pcall(rl.event, rl, ev, fields)
 end
 
 function Game:display_name(id)
@@ -289,6 +316,125 @@ function Game:reseed(...)
 	return true
 end
 
+-- Rank picks ------------------------------------------------------------------------
+-- The game picks most things by drawing one random index into the list of
+-- *eligible* options. If two racers' lists differ by one entry (a door reward
+-- that bans an encounter, a god only one of them has unlocked), the same draw
+-- lands on different options. Inside a rank-pick scope the game's
+-- GetRandomValue / RemoveRandomValue / GetRandomValueFromWeightedList instead
+-- score every option from (race seed, tags, pick #, option name, copy #) and
+-- take the best eligible one (prunes drop the worst). Equal lists give equal
+-- picks, a missing option only changes the picks it would have won, and the
+-- result doesn't depend on table order (pairs order differs between game
+-- processes).
+
+local RANK_FNS = { 'GetRandomValue', 'RemoveRandomValue', 'GetRandomValueFromWeightedList' }
+
+local function option_key(v)
+	if type(v) == 'table' then
+		local k = rawget(v, 'Name') or rawget(v, 'ItemName') or rawget(v, 'Type')
+		return k ~= nil and tostring(k) or 'table'
+	end
+	return tostring(v)
+end
+Game.option_key = option_key
+
+-- Run fn(...) with rank picks keyed on `tags`. opts.limit: only the first N
+-- picks are ranked (later ones use the game's own functions on the reseeded
+-- RNG); opts.key(v): the option's name when the list holds indices.
+function Game:rank_scope(tags, opts, fn, ...)
+	local G = self.G
+	local seed = self:race_seed()
+	if not seed or (self.mutations and (self.mutations.no_depth_seed or self.mutations.no_rank_pick)) then return fn(...) end
+	opts = opts or {}
+	local keyfn = opts.key or option_key
+	local saved = {}
+	for _, name in ipairs(RANK_FNS) do saved[name] = G[name] end
+	local calls = 0
+	local unpack_ = table.unpack or unpack
+	local function next_pick()
+		calls = calls + 1
+		return opts.limit == nil or calls <= opts.limit
+	end
+	local function score(pick, key, copy)
+		local parts = { unpack_(tags) }
+		parts[#parts + 1] = pick
+		parts[#parts + 1] = key
+		parts[#parts + 1] = copy
+		return hash_seed(seed, unpack_(parts))
+	end
+	G.GetRandomValue = function(t, rng)
+		if t == nil or not next_pick() then return saved.GetRandomValue(t, rng) end
+		local pick, best, best_score, copies = calls, nil, nil, {}
+		for _, v in ipairs(G.CollapseTableOrdered(t)) do
+			local key = keyfn(v)
+			copies[key] = (copies[key] or 0) + 1
+			local sc = score(pick, key, copies[key])
+			if best_score == nil or sc < best_score then best, best_score = v, sc end
+		end
+		return best
+	end
+	-- Prunes keep the best ranks: one ranking for every prune in the scope.
+	G.RemoveRandomValue = function(t, rng)
+		if t == nil or G.TableLength(t) <= 0 or not next_pick() then return saved.RemoveRandomValue(t, rng) end
+		t = G.OverwriteAndCollapseTable(t)
+		if G.cmp_multitype then table.sort(t, G.cmp_multitype) end
+		local worst, worst_score, copies = nil, nil, {}
+		for i, v in ipairs(t) do
+			local key = keyfn(v)
+			copies[key] = (copies[key] or 0) + 1
+			local sc = score('prune', key, copies[key])
+			if worst_score == nil or sc > worst_score then worst, worst_score = i, sc end
+		end
+		local v = t[worst]
+		t[worst] = nil
+		return v
+	end
+	-- Weighted: the smallest -ln(u)/weight wins, which picks in proportion to weight.
+	G.GetRandomValueFromWeightedList = function(t, rng)
+		if t == nil or not next_pick() then return saved.GetRandomValueFromWeightedList(t, rng) end
+		local pick, best, best_score = calls, nil, nil
+		for value, weight in pairs(t) do
+			if type(weight) == 'number' and weight > 0 then
+				local u = (score(pick, keyfn(value), 1) % 1000000 + 0.5) / 1000000
+				local sc = -math.log(u) / weight
+				if best_score == nil or sc < best_score or (sc == best_score and tostring(value) < tostring(best)) then
+					best, best_score = value, sc
+				end
+			end
+		end
+		return best
+	end
+	self:reseed('rank', unpack_(tags))
+	local results = { pcall(fn, ...) }
+	for _, name in ipairs(RANK_FNS) do G[name] = saved[name] end
+	if not results[1] then error(results[2], 0) end
+	return unpack_results(results)
+end
+
+-- Random rolls made on the shared combat RNG at unpredictable moments (urns,
+-- gold drops): decide them from the seed, then resume the combat stream from a
+-- value drawn before, so combat rolls don't become predictable.
+function Game:seeded_call(base, tags, ...)
+	if not self:race_seed() or (self.mutations and self.mutations.no_depth_seed) then return base(...) end
+	local G = self.G
+	local resume = G.RandomInt(1, 1000000000)
+	self:reseed((table.unpack or unpack)(tags))
+	local results = { pcall(base, ...) }
+	self:reseed('resume', resume)
+	if not results[1] then error(results[2], 0) end
+	return unpack_results(results)
+end
+
+-- How many times `tag` happened in the current room (for per-room keys).
+function Game:room_count(tag)
+	local room = self.G.CurrentRun and self.G.CurrentRun.CurrentRoom
+	if not room then return 0 end
+	room.RaceCounts = room.RaceCounts or {}
+	room.RaceCounts[tag] = (room.RaceCounts[tag] or 0) + 1
+	return room.RaceCounts[tag]
+end
+
 function Game:hook_LeaveRoom(base, run, door)
 	if self:race_seed() and door and door.Room and run then
 		local next_room, depth = door.Room, self:race_depth() + 1
@@ -302,6 +448,8 @@ function Game:hook_LeaveRoom(base, run, door)
 			next_room.Flipped = roll < (next_room.FlipHorizontalChance or 0.5)
 		end
 		self.leaving_depth = depth
+		self:rlog('take_door', { room = next_room.Name, reward = next_room.ChosenRewardType, loot = next_room.ForceLootName,
+			encounter = next_room.Encounter and next_room.Encounter.Name })
 	end
 	return base(run, door)
 end
@@ -317,14 +465,190 @@ function Game:hook_RandomSetNextInitSeed(base, args)
 	return base(args)
 end
 
+-- The rewards on every door into `room` (the room we're leaving offers them).
+function Game:door_rewards_into(run, room)
+	local cur = run and run.CurrentRoom
+	if not (cur and room and cur ~= room and type(cur.OfferedRewards) == 'table') then return {} end
+	local types, seen = {}, {}
+	for id, reward in pairs(cur.OfferedRewards) do
+		local leads = cur.ExitDoorRooms and cur.ExitDoorRooms[id]
+		local t = type(reward) == 'table' and reward.Type or nil
+		if t and not seen[t] and (leads == nil or leads == room or (type(leads) == 'table' and leads.Name == room.Name)) then
+			seen[t] = true
+			types[#types + 1] = t
+		end
+	end
+	table.sort(types)
+	return types
+end
+
+-- An encounter counts as eligible for the room only if it is for every door's
+-- reward: otherwise the door you took decides whether Artemis or Nemesis is
+-- there (both ban some rewards). Then one ranked pick.
+function Game:choose_encounter(base, run, room, args, union)
+	local G = self.G
+	local tags = { 'encounter', self:race_depth(), room and room.Name, args and args.LegalEncounters and 'cage' or 'main' }
+	local types = union and self:door_rewards_into(run, room) or {}
+	local orig = G.IsEncounterEligible
+	if #types > 1 and orig then
+		G.IsEncounterEligible = function(r, rm, data, a)
+			if rm ~= room then return orig(r, rm, data, a) end
+			local chosen = rm.ChosenRewardType
+			for _, t in ipairs(types) do
+				rm.ChosenRewardType = t
+				if not orig(r, rm, data, a) then
+					rm.ChosenRewardType = chosen
+					return false
+				end
+			end
+			rm.ChosenRewardType = chosen
+			return true
+		end
+	end
+	local results = { pcall(self.rank_scope, self, tags, { limit = 1 }, base, run, room, args) }
+	G.IsEncounterEligible = orig
+	if not results[1] then error(results[2], 0) end
+	return results[2]
+end
+
 function Game:hook_ChooseEncounter(base, run, room, args)
 	self:reseed('encounter', self:race_depth(), room and room.Name, args and args.LegalEncounters and 'cage' or 'main')
-	return base(run, room, args)
+	local encounter
+	if self:race_seed() then
+		local ok, res = pcall(self.choose_encounter, self, base, run, room, args, args == nil)
+		if ok and res ~= nil then
+			encounter = res
+		else
+			-- Nothing fits every door's reward: this door's reward decides.
+			self.log('game: encounter for every door failed (' .. tostring(res) .. '); per door')
+			encounter = self:choose_encounter(base, run, room, args, false)
+		end
+	else
+		encounter = base(run, room, args)
+	end
+	self:rlog('encounter', { room = room and room.Name, encounter = type(encounter) == 'table' and encounter.Name or nil,
+		kind = args and args.LegalEncounters and 'cage' or 'main', for_door = self.unlock_ctx ~= nil })
+	return encounter
 end
 
 function Game:hook_RunShopGeneration(base, room)
 	self:reseed('shop', self:race_depth(), room and room.Name)
-	return base(room)
+	local res = base(room)
+	local store = room and room.Store
+	if store and store.StoreOptions then
+		local items = {}
+		for _, item in ipairs(store.StoreOptions) do items[#items + 1] = tostring(item.Name) end
+		self:rlog('store', { room = room.Name, store = room.StoreDataName, items = items })
+	end
+	return res
+end
+
+function Game:hook_HandleStorePurchase(base, screen, button)
+	local item = button and button.Data and button.Data.Name
+	local res = base(screen, button)
+	self:rlog('buy', { item = item })
+	return res
+end
+
+-- Boon (and other upgrade) choices: everything offered, and the pick.
+function Game:hook_HandleUpgradeChoiceSelection(base, screen, button, args)
+	local loot = button and button.LootData
+	if loot and self.race then
+		local offered = {}
+		for _, o in pairs(loot.UpgradeOptions or {}) do
+			offered[#offered + 1] = { name = tostring(o.ItemName), rarity = o.Rarity }
+		end
+		table.sort(offered, function(a, b) return a.name < b.name end)
+		self:rlog('boon', { source = loot.Name, offered = offered, picked = button.Data and button.Data.Name })
+	end
+	return base(screen, button, args)
+end
+
+-- Which god a boon door (or other loot) offers: one ranked pick.
+function Game:hook_ChooseLoot(base, exclude, force)
+	if not self:race_seed() then return base(exclude, force) end
+	local ctx = self.unlock_ctx
+	local n
+	if ctx then
+		ctx.loot = (ctx.loot or 0) + 1
+		n = ctx.loot
+	else
+		n = 'room' .. self:room_count('loot')
+	end
+	return self:rank_scope({ 'loot', self:race_depth(), n }, { limit = 1 }, base, exclude, force)
+end
+
+-- Shop and Well of Charon stock: ranked picks and prunes.
+function Game:hook_FillInShopOptions(base, args)
+	if not self:race_seed() then return base(args) end
+	return self:rank_scope({ 'stock', self:race_depth(), args and args.RoomName, self:room_count('stock') }, nil, base, args)
+end
+
+-- A god's boon offer: the same options (and rarity rolls) for every racer who
+-- opens that god's boon at this depth, as far as their boons allow.
+function Game:hook_SetTraitsOnLoot(base, loot, args)
+	if not (self:race_seed() and type(loot) == 'table') then return base(loot, args) end
+	local tags = { 'boons', self:race_depth(), tostring(loot.Name), self:room_count('boons_' .. tostring(loot.Name)) }
+	return self:rank_scope(tags, nil, base, loot, args)
+end
+
+-- Every weapon the hero fires (attacks, specials, casts, dashes): tell our
+-- shadow on the rivals' screens to play the same animation.
+function Game:hook_CheckPlayerOnFirePowers(base, args, ...)
+	pcall(self.note_fire, self, args)
+	return base(args, ...)
+end
+
+function Game:note_fire(args)
+	local shadow, G = self.shadow, self.G
+	if not (shadow and args and (self:race_run_live() or shadow.mirror)) then return end
+	local weapon = args.name
+	local anim = ACTION_ANIMS[weapon]
+	if not anim and G.GetWeaponDataValue and G.CurrentRun and G.CurrentRun.Hero then
+		anim = G.GetWeaponDataValue({ Id = G.CurrentRun.Hero.ObjectId, WeaponName = weapon, Property = 'FireGraphic' })
+	end
+	shadow:note_action(anim)
+end
+
+-- What a field NPC offers (Nemesis's trade, Echo, Arachne, Narcissus, Medea,
+-- Circe, Icarus): ranked per depth, like every other offer.
+local NPC_CHOICES = { 'EchoChoice', 'ArachneCostumeChoice', 'NarcissusBenefitChoice', 'MedeaCurseChoice',
+	'CirceBlessingChoice', 'IcarusBenefitChoice', 'NemesisTradeChoice' }
+for _, name in ipairs(NPC_CHOICES) do
+	HOOKS[#HOOKS + 1] = name
+	Game['hook_' .. name] = function(self, base, ...)
+		if not self:race_seed() then return base(...) end
+		return self:rank_scope({ 'npc', self:race_depth(), name }, nil, base, ...)
+	end
+end
+
+-- Selene: which hex a moon reward is, and the three hexes her screen offers.
+function Game:hook_ChooseSpell(base, room, args)
+	if not self:race_seed() then return base(room, args) end
+	return self:rank_scope({ 'spell', self:race_depth() }, { limit = 1 }, base, room, args)
+end
+
+function Game:hook_CreateSpellButtons(base, screen)
+	if not self:race_seed() then return base(screen) end
+	return self:rank_scope({ 'hexes', self:race_depth(), self:room_count('hexes') }, nil, base, screen)
+end
+
+function Game:hook_HandleBreakableSwap(base, room, args)
+	return self:seeded_call(base, { 'urns', self:race_depth(), room and room.Name }, room, args)
+end
+
+function Game:hook_CheckMoneyDrop(base, enemy, data, attacker)
+	local name = type(enemy) == 'table' and tostring(enemy.Name) or '?'
+	return self:seeded_call(base, { 'money', self:race_depth(), name, self:room_count('money_' .. name) }, enemy, data, attacker)
+end
+
+function Game:hook_ProcessObjectValueOptions(base, object)
+	local name = type(object) == 'table' and tostring(object.Name) or '?'
+	return self:seeded_call(base, { 'value', self:race_depth(), name, self:room_count('value_' .. name) }, object)
+end
+
+function Game:hook_CheckChallengeSwitchItemValidity(base, run)
+	return self:seeded_call(base, { 'switch', self:race_depth() }, run)
 end
 
 -- Every generic exit door at a depth leads to the same next room; each door
@@ -336,7 +660,7 @@ function Game:hook_ChooseNextRoomData(base, run, args, other_doors)
 	end
 	if ctx.room_data then return ctx.room_data end
 	self:reseed('route', ctx.depth)
-	ctx.room_data = base(run, args, other_doors)
+	ctx.room_data = self:rank_scope({ 'route', ctx.depth }, nil, base, run, args, other_doors)
 	return ctx.room_data
 end
 
@@ -351,9 +675,17 @@ function Game:hook_ChooseRoomReward(base, run, room, store, previous, args)
 	if self:race_seed() and run and self.race and self.race.base_rerolls then
 		local saved = run.NumRerolls
 		run.NumRerolls = self.race.base_rerolls
-		local ok, res = pcall(base, run, room, store, previous, args)
+		local ctx = self.unlock_ctx or {}
+		ctx.rewards = (ctx.rewards or 0) + 1
+		local entries = run.RewardStores and run.RewardStores[store] or {}
+		local tags = { 'reward', self:race_depth(), tostring(store), self.unlock_ctx and ctx.rewards or self:room_count('reward') }
+		local ok, res = pcall(self.rank_scope, self, tags, { key = function(k)
+			local e = entries[k]
+			return type(e) == 'table' and tostring(e.Name) or tostring(k)
+		end }, base, run, room, store, previous, args)
 		run.NumRerolls = saved
 		if not ok then error(res, 0) end
+		self:rlog('reward', { room = room and room.Name, reward = res, store = store })
 		return res
 	end
 	return base(run, room, store, previous, args)
@@ -420,7 +752,13 @@ function Game:hook_StartNewRun(base, prevRun, args)
 		pcall(self.apply_seed, self, race.seed)
 		self.race = { race = race, run = self.G.CurrentRun, rooms = {}, finished = false,
 			base_rerolls = self.G.CurrentRun and self.G.CurrentRun.NumRerolls }
+		self.dream_biomes = 0
 		self.log('game: race run created for race ' .. tostring(race.race_id))
+		if self.racelog then
+			pcall(self.racelog.start, self.racelog, { race_id = race.race_id, seed = race.seed, weapon = race.weapon,
+				keepsake = race.keepsake, name = self.client and self.client.name, version = self.client and self.client.version,
+				game_build = self.client and self.client.game_build })
+		end
 	end
 	return run
 end
@@ -435,6 +773,10 @@ end
 
 function Game:hook_ChooseStartingRoom(base, run, args)
 	if self.launching then pcall(self.apply_seed, self, self.launching.seed) end
+	-- Mid-run starts (each Dream Dive biome): seeded and ranked per depth.
+	if not self.launching and self:race_run_live() then
+		return self:rank_scope({ 'start', self:race_depth(), args and args.StartingBiome }, nil, base, run, args)
+	end
 	return base(run, args)
 end
 
@@ -467,6 +809,8 @@ function Game:on_room_start(run, room)
 	}
 	local rooms = self.race.rooms
 	rooms[#rooms + 1] = entry
+	if self.racelog then self.racelog:set_depth(entry.depth) end
+	self:rlog('room', entry)
 	self.log(string.format('game: room %d %s biome=%s seed=%s encounter=%s reward=%s', entry.depth, tostring(entry.name),
 		tostring(entry.biome), tostring(entry.seed), tostring(entry.encounter), tostring(entry.reward)))
 	if self.client then self.client:report_progress(self:progress(), true) end
@@ -511,21 +855,27 @@ function Game:record_doors(room)
 	end
 	table.sort(doors, function(a, b) return a.id < b.id end)
 	entry.doors = doors
+	local offered = {}
+	for i, d in ipairs(doors) do offered[i] = { room = d.room, reward = d.reward, loot = d.loot } end
+	self:rlog('doors', { doors = offered })
 end
 
 function Game:hook_KillHero(base, victim, triggerArgs)
-	-- Competitive mode, already on the way back to the Crossroads: no death sequence.
-	if self.going_home then return end
+	-- Competitive mode, already on the way back to the Crossroads: no death
+	-- sequence. A cleared Dream Dive kills the hero after its clear screen.
+	if self.going_home or (self.race and self.race.cleared and self:competitive_active()) then return end
 	if self:race_run_live() then
+		self:rlog('died', { room = self.G.CurrentRun.CurrentRoom and self.G.CurrentRun.CurrentRoom.Name })
 		self.race.finished = true
 		self.log('game: hero died in race run')
 		if self.client then
 			self.client:report_progress(self:progress(false), true)
 			self.client:report_complete(false, nil, self:run_stats(), self:build_list())
 		end
-		-- Straight home like a forfeit: the death sequence would play story
-		-- scenes in Hub_Main and wait for input before the results.
-		if self:competitive_active() and self:go_home('died') then return end
+		-- The game's death animation, then straight home: the full death
+		-- sequence would play story scenes in Hub_Main and wait for input
+		-- before the results.
+		if self:competitive_active() and self:die_and_go_home(triggerArgs) then return end
 	end
 	return base(victim, triggerArgs)
 end
@@ -536,7 +886,9 @@ function Game:hook_RecordRunCleared(base, ...)
 	-- clock; in a race it shows the one real-time race clock instead.
 	if self:race_run_live() and run and self.client then run.GameplayTime = self.client:race_time() end
 	local res = base(...)
-	if self:race_run_live() and run and run.Cleared and not run.ActiveBounty and not run.IsDreamRun then
+	local dream_race = self.race and self.race.race and self.race.race.route == 'dream'
+	if self:race_run_live() and run and run.Cleared and not run.ActiveBounty and (dream_race or not run.IsDreamRun) then
+		self:rlog('cleared', { time = self.client and self.client:race_time() })
 		self.race.finished = true
 		self.race.cleared = true
 		self.log('game: race run cleared')
@@ -575,8 +927,56 @@ function Game:go_home(why)
 	return true
 end
 
+-- What KillHero does up to its death presentation (spawns stopped, music and
+-- ambience ended, Melinoe's death animation and the death banner), minus the
+-- run bookkeeping and the death map; then home to the competitive hub.
+function Game:die_and_go_home(triggerArgs)
+	local G = self.G
+	local run = G.CurrentRun
+	if not (run and run.Hero and G.LoadMap) then return false end
+	self.going_home = true
+	self.death_cleanup = true
+	local args = triggerArgs or {}
+	local killer = args.AttackerTable or { Name = args.AttackerName, ObjectId = args.AttackerId }
+	self:spawn(function()
+		local ok, err = pcall(function()
+			for _, name in pairs(run.CurrentRoom and run.CurrentRoom.SpawnThreads or {}) do G.killTaggedThreads(name) end
+			if G.MapState then G.MapState.BlockSpawns = true end
+			if run.CurrentRoom then run.CurrentRoom.SpawnThreads = {} end
+			if G.EndAmbience then G.EndAmbience(0.5) end
+			local audio = G.AudioState
+			if G.EndMusic and audio then G.EndMusic(audio.MusicId, audio.MusicName, 0.0) end
+			run.Hero.IsDead = true
+			if G.SessionMapState then G.SessionMapState.HandlingDeath = true end
+			G.DeathPresentation(run, killer, args)
+		end)
+		if not ok then self.log('game: death presentation failed: ' .. tostring(err)) end
+		self.log('game: returning to the Crossroads (died)')
+		run.Hero.IsDead = true
+		run.NextHeroStartPoint, run.NextHeroEndPoint = 40009, 40012
+		if G.SessionMapState then G.SessionMapState.HandlingDeath = false end
+		G.LoadMap({ Name = 'Hub_PreRun' })
+	end)
+	return true
+end
+
 function Game:in_hub_now()
-	if self.going_home and self:in_hub() then self.going_home = false end
+	if self.going_home and self:in_hub() then
+		self.going_home = false
+		-- Undo what the death presentation locked (a real death undoes these
+		-- in the death area's arrival presentation, which we skip).
+		if self.death_cleanup then
+			self.death_cleanup = false
+			local G = self.G
+			for _, f in ipairs({
+				function() G.RemoveInputBlock({ Name = 'DeathPresentation' }) end,
+				function() G.UnzeroMouseTether('DeathPresentation') end,
+				function() G.UnlockCameraMotion('DeathPresentation') end,
+				function() G.ToggleCombatControl(G.CombatControlsDefaults, true, 'DeathPresentation') end,
+				function() G.ShowCombatUI('Death') end,
+			}) do pcall(f) end
+		end
+	end
 end
 
 -- competitive mode ------------------------------------------------------------------
@@ -605,12 +1005,14 @@ function Game:hook_StartNewGame(base, mapName)
 	local c = self.G.RankedRaceCompetitive
 	if not (c and c.requested) then return base(mapName) end
 	c.requested = false
-	local ok, summary = pcall(self.profile.build, self.G)
+	-- Active while building too: unlocking everything must not save or earn achievements.
+	c.active = true
+	local ok, summary = pcall(self.profile.build, self.G, self.saved_loadout)
 	if not ok then
+		c.active = false
 		self.log('game: competitive profile build FAILED: ' .. tostring(summary))
 		return
 	end
-	c.active = true
 	-- Arrive as if walking in from the Crossroads door (DeathLoopData PreRunExit:
 	-- HeroStartPoint 40009 -> HeroEndPoint 40012). Without a walk-in the hero
 	-- stands inside the auto-activating exit back to Hub_Main and bounces.
@@ -633,6 +1035,23 @@ function Game:hook_Load(base, data)
 		c.active, c.requested = false, false
 	end
 	return base(data)
+end
+
+-- The competitive profile has everything; it must not earn the player's real
+-- Steam achievements.
+function Game:hook_UnlockAchievement(base, ...)
+	if self:competitive_active() then return end
+	return base(...)
+end
+
+function Game:hook_CheckProgressAchievements(base, ...)
+	if self:competitive_active() then return end
+	return base(...)
+end
+
+function Game:hook_CheckAchievement(base, ...)
+	if self:competitive_active() then return end
+	return base(...)
 end
 
 -- Belt and braces on top of IllegalConversationModification: competitive mode never saves.
@@ -786,6 +1205,11 @@ function Game:start_race(race)
 		end
 	end
 	if race.keepsake ~= '' then GS.LastAwardTrait = race.keepsake end
+	-- Remember this racer's Arcana, familiar and aspects for the next session.
+	if self:competitive_active() and self.save_loadout then
+		local ok, err = pcall(function() self.save_loadout(self.profile.capture_loadout(GS)) end)
+		if not ok then self.log('game: saving the loadout failed: ' .. tostring(err)) end
+	end
 	self.launching = race
 	self.status = nil
 	local start_over = self:fn('StartOver')
@@ -794,12 +1218,105 @@ function Game:start_race(race)
 		self.log('game: ' .. self.status)
 		return
 	end
-	self.log(string.format('game: launching race %s seed=%s', tostring(race.race_id), tostring(race.seed)))
-	self:spawn(start_over, { StartingBiome = 'F' })
+	local route = ROUTES[race.route] or ROUTES.underworld
+	if route.dream then
+		-- What UseDreamRunDoor does before StartOver.
+		GS.StoredActiveShrineBounty = GS.ActiveShrineBounty
+		GS.ActiveShrineBounty = nil
+	end
+	self:restore_door_prompts()
+	self.log(string.format('game: launching race %s seed=%s route=%s', tostring(race.race_id), tostring(race.seed),
+		tostring(race.route)))
+	self:spawn(start_over, route.start())
+end
+
+-- Run doors in the competitive Crossroads ------------------------------------------
+-- During the prep time after the votes, the voted route's door marks you ready
+-- (everyone then starts together after the countdown). While a race is being
+-- set up or run, the doors don't start runs of their own. Outside races they
+-- work as usual (practice runs).
+
+function Game:notice(title, subtitle, good)
+	if self.banner then pcall(self.banner.notice, self.banner, title, subtitle, good) end
+end
+
+function Game:race_door(route)
+	if not self:competitive_active() then return false end
+	local c = self.client
+	local phase = c and c:phase()
+	if not phase or phase == 'waiting' or phase == 'finished' then return false end
+	if phase == 'ready_check' then
+		local vote = c.state.vote_results.route
+		local voted = vote and vote.selected
+		if voted and voted ~= '' and voted ~= route and ROUTES[voted] then
+			self:notice('Wrong Way', 'This race starts at ' .. ROUTES[voted].label)
+		else
+			if c:ready() then self:notice('Ready', 'The race starts when everyone is ready', true) end
+		end
+	else
+		self:notice('Not Yet', 'The race starts from the Race Board')
+	end
+	return true
+end
+
+function Game:hook_UseEscapeDoor(base, usee, args, ...)
+	if self:race_door(args and args.StartingBiome == 'N' and 'surface' or 'underworld') then return end
+	return base(usee, args, ...)
+end
+
+function Game:hook_UseDreamRunDoor(base, usee, args, ...)
+	if self:race_door('dream') then return end
+	return base(usee, args, ...)
+end
+
+-- The prep time's prompt on the voted route's door: "{I} Ready to Race".
+function Game:update_door_prompts()
+	local c, G = self.client, self.G
+	if not (c and G.MapState and G.MapState.ActiveObstacles and self:competitive_active() and self:in_hub()) then return end
+	local want
+	if c:phase() == 'ready_check' then
+		local vote = c.state.vote_results.route
+		want = (ROUTES[vote and vote.selected or ''] or ROUTES.underworld).door
+	end
+	if want == self.ready_door then return end
+	self:restore_door_prompts()
+	local door = want and G.MapState.ActiveObstacles[want]
+	if door then
+		self.ready_door = want
+		self.ready_door_text = door.UseText
+		door.UseText = 'RankedRace_ReadyDoor'
+		if G.RefreshUseButton then pcall(G.RefreshUseButton, door.ObjectId, door) end
+	end
+end
+
+function Game:restore_door_prompts()
+	local G = self.G
+	local door = self.ready_door and G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[self.ready_door]
+	if door and self.ready_door_text then
+		door.UseText = self.ready_door_text
+		if G.RefreshUseButton then pcall(G.RefreshUseButton, door.ObjectId, door) end
+	end
+	self.ready_door, self.ready_door_text = nil, nil
+end
+
+-- Dream Dive: the next dream biome is a random pick that also avoids the last
+-- dive's start (a save-dependent record); decide it from the race seed.
+function Game:hook_SelectNextDreamBiome(base, ...)
+	if not self:race_run_live() or (self.mutations and self.mutations.no_depth_seed) then return base(...) end
+	local GS = self.G.GameState
+	self.dream_biomes = (self.dream_biomes or 0) + 1
+	local saved = GS and GS.LastDreamStartingBiome
+	if GS then GS.LastDreamStartingBiome = nil end
+	self:reseed('dreambiome', self.dream_biomes)
+	local results = { pcall(base, ...) }
+	if GS and GS.LastDreamStartingBiome == nil then GS.LastDreamStartingBiome = saved end
+	if not results[1] then error(results[2], 0) end
+	return unpack_results(results)
 end
 
 function Game:race_over(result)
 	if self.race then self.race.finished = true end
+	if self.racelog then pcall(self.racelog.stop, self.racelog, { reason = result and result.reason, you_won = result and result.you_won }) end
 	self:restore_loadout()
 end
 
@@ -874,16 +1391,17 @@ function Game:run_stats()
 	}
 end
 
--- Pause menu "Forfeit Race" (or Quit) during a live race: ask first (the
--- Race Board shows the prompt, controller-first). See competitive.lua.
+-- Pause menu "Race Menu" (or Quit) during a live race: the Race Board shows
+-- the race menu (chat, forfeit) or the forfeit prompt, controller-first.
+-- See competitive.lua.
 function Game:forfeit_available()
 	return self:race_run_live() and self.client ~= nil
 end
 
-function Game:request_forfeit()
+function Game:request_forfeit(page)
 	if not self:forfeit_available() then return false end
-	self.log('game: forfeit requested')
-	if self.board then self.board:prompt('forfeit') end
+	self.log('game: ' .. (page == 'race' and 'race menu' or 'forfeit') .. ' requested')
+	if self.board then self.board:prompt(page or 'forfeit') end
 	return true
 end
 
@@ -893,6 +1411,7 @@ end
 function Game:forfeit_now()
 	if not self:forfeit_available() then return false end
 	local G = self.G
+	self:rlog('forfeit', {})
 	self.race.finished = true
 	self.race.forfeited = true
 	self.log('game: forfeiting the race')
@@ -956,6 +1475,7 @@ end
 function Game:update()
 	pcall(self.diagnose, self, self.now())
 	self:in_hub_now()
+	pcall(self.update_door_prompts, self)
 	-- One timer: the game's own run timer pauses for menus and boon choices,
 	-- so in competitive mode it is hidden and the race clock is the only one.
 	if self:competitive_active() and self.G.SetConfigOption and self.now() - (self.last_timer_block or 0) >= 1 then
@@ -1023,6 +1543,15 @@ function Game:bot_advance_room()
 		self.adv = nil
 		return 'failed'
 	end
+	-- Dream Dive: the intro room has no doors; talking to Hypnos sends you on.
+	if a.phase == 'engage' and a.room and a.room.Name == 'Dream_Intro' and G.EnterNextDreamBiome then
+		if not a.room.RaceBotEntered then
+			a.room.RaceBotEntered = true
+			self.log('game: bot entering the first dream biome')
+			self:spawn(G.EnterNextDreamBiome, nil, {})
+		end
+		a.phase = 'wait_room'
+	end
 	if a.phase == 'engage' then
 		local room = a.room
 		-- Wait for DoUnlockRoomExits to finish assigning rooms to every door:
@@ -1047,8 +1576,37 @@ function Game:bot_advance_room()
 					G.DestroyRequiredKills({ BlockLoot = true })
 					a.killing = false
 				end)
+			elseif not a.killing and now - a.t0 > 12 and G.ActiveEnemies and next(G.ActiveEnemies)
+				and ((encounter and encounter.StartTime and not encounter.Completed) or self:bot_pylon_left()) then
+				-- Fights won by breaking things rather than killing required
+				-- enemies (Arachne's cocoons, the Surface's Soul Pylons): clear everything left.
+				a.killing = true
+				self.log('game: bot clearing every active enemy (' .. tostring(encounter.Name) .. ')')
+				self:spawn(function()
+					for _, enemy in pairs(G.ShallowCopyTable(G.ActiveEnemies)) do
+						if type(enemy) == 'table' and not enemy.IsDead then
+							enemy.MoneyDropOnDeath, enemy.MetaPointDropOnDeath = nil, nil
+							G.thread(G.Kill, enemy, { BlockRespawns = true, SkipDeathWeapons = true })
+						end
+					end
+					G.wait(1)
+					a.killing = false
+				end)
 			end
 			-- Rewards can gate the fight (opening room: boon first) or follow it.
+			-- A gating reward isn't always a required object (Selene's moon in
+			-- the opening room): use the room's reward if the fight won't start.
+			if encounter and not encounter.StartTime and now - a.t0 > 6 and not a.used_room_reward then
+				local name = room.ForceLootName or room.ChosenRewardType
+				local ids = name and self:call('GetIdsByType', { Name = name })
+				local obj = ids and ids[1] and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[ids[1]]
+				if obj and obj.OnUsedFunctionName then
+					a.used_room_reward = true
+					self.log('game: bot using the room reward ' .. tostring(name))
+					local hero = run.Hero
+					self:spawn(G.CallFunctionName, obj.OnUsedFunctionName, obj, obj.OnUsedFunctionArgs, hero)
+				end
+			end
 			self:bot_collect_rewards(a)
 			self:bot_choose_upgrade()
 		end
@@ -1088,6 +1646,14 @@ function Game:bot_advance_room()
 		end
 	end
 	return 'working'
+end
+
+-- A Surface room's Soul Pylon still standing (the exits wait for it).
+function Game:bot_pylon_left()
+	for _, enemy in pairs(self.G.ActiveEnemies or {}) do
+		if type(enemy) == 'table' and enemy.Name == 'SoulPylon' and not enemy.IsDead then return true end
+	end
+	return false
 end
 
 -- Use each object the room requires (boon, max-health drop, ...) once, the
@@ -1149,6 +1715,25 @@ end
 -- An open boon/upgrade choice: take the first option, like clicking it.
 function Game:bot_choose_upgrade()
 	local G = self.G
+	-- Nemesis's trade: decline it (the room then plays out normally).
+	local trade = G.ActiveScreens and G.ActiveScreens.TradeScreen
+	if trade and not trade.bot_declined and G.TradeScreenDecline then
+		trade.bot_declined = true
+		self.log('game: bot declining a trade')
+		self:spawn(G.TradeScreenDecline, trade, nil)
+		return
+	end
+	-- Selene's hex choice is its own screen.
+	local spell = G.ActiveScreens and G.ActiveScreens.SpellScreen
+	if spell and spell.Components and not spell.bot_chose then
+		local button = spell.Components.PurchaseButton1
+		if button and G.AcceptAndCloseSpellScreen then
+			spell.bot_chose = true
+			self.log('game: bot choosing the first hex')
+			self:spawn(G.AcceptAndCloseSpellScreen, spell, button)
+		end
+		return
+	end
 	local screen = G.ScreenAnchors and G.ScreenAnchors.ChoiceScreen
 	if not (screen and screen.Components) or screen.ChoiceMade or screen.bot_chose then return end
 	local button = screen.Components.PurchaseButton1

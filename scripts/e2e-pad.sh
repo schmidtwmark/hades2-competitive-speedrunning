@@ -8,9 +8,9 @@
 # Script: home -> A (Find Match, focused) ; weapon vote -> Right Right A
 # (third weapon: proves D-pad navigation) ; keepsake vote -> Down A ;
 # ready check -> A. Logs: local/runs/<stamp>-pad/. Prints RESULT: PASS|FAIL.
-# PAD_SCENARIO=forfeit: after the rooms, Start -> Down Down A ("Forfeit Race"
-# in the native pause menu) -> Up A (the prompt's Forfeit); the rival then
-# finishes and wins.
+# PAD_SCENARIO=forfeit: after the rooms, Start -> Down Down A ("Race Menu"
+# in the native pause menu) -> Up A (its Forfeit Race) -> Up A (the confirm
+# prompt's Forfeit); the rival then finishes and wins.
 #   scripts/e2e-pad.sh [rooms]
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -98,7 +98,9 @@ if [ "$SCEN" = forfeit ]; then
   sleep 2
   pad start            # native pause menu, cursor on Continue
   sleep 1.5
-  pad down down a      # Options, then "Forfeit Race"
+  pad down down a      # Options, then "Race Menu"
+  wait_page "prompt:race" 30
+  pad up a             # the race menu focuses Back; Forfeit Race is above it
   wait_page "prompt:forfeit" 30
   pad up a             # the prompt focuses Keep Racing; Forfeit is above it
 fi
@@ -131,7 +133,7 @@ NAV_OK=0; [ "$VOTE" = WeaponTorch ] && NAV_OK=1
 echo "--- D-pad navigation: weapon vote $VOTE (want WeaponTorch): $([ $NAV_OK = 1 ] && echo ok || echo WRONG)"
 PAUSE_OK=1
 if [ "$SCEN" = forfeit ]; then
-  grep -q 'pause menu Undo Night -> forfeit prompt' "$RUN/ranked.log" && grep -q 'game: forfeiting the race' "$RUN/ranked.log" || PAUSE_OK=0
+  grep -q 'pause menu Undo Night -> race prompt' "$RUN/ranked.log" && grep -q 'game: forfeiting the race' "$RUN/ranked.log" || PAUSE_OK=0
   echo "--- forfeit through the native pause menu: $([ $PAUSE_OK = 1 ] && echo ok || echo MISSING)"
 fi
 if grep -q '^RESULT: PASS' "$RUN/bot-result.txt" 2>/dev/null && [ $NAV_OK = 1 ] && [ $PAUSE_OK = 1 ]; then

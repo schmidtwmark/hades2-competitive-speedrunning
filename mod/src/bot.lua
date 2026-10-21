@@ -17,6 +17,13 @@
 --   timeout       seconds before giving up (default 600)
 --   trace_file    where to write the per-room trace (optional)
 --   quit_after    exit the game this many seconds after the result (optional)
+--   ready_via_door  ready up by using the voted route's exit in the Crossroads
+--   chat          a line to send when the run starts (checks both racers' lines arrive)
+--   chat_on_board n: during the prep time, send quick line n from the board's chat page
+--   welcome_dwell show the first-open welcome page this many seconds, then Continue
+--   race_menu_peek  mid-run, open the Race Menu and its chat page, then go back (screenshots)
+--   shadow_mirror { dx, dy }: also draw our own hero's shadow, offset (size checks)
+--   shadow_scale  override the shadow's scale (size checks)
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
 
@@ -40,6 +47,10 @@ function Bot.new(deps)
 	end
 	b.cfg = cfg
 	b.active = true
+	-- Test runs start on the board's home page, not the first-open welcome
+	-- (welcome_dwell: show it that many seconds first, then Continue).
+	if b.board and not cfg.welcome_dwell then b.board.ui.welcome = false end
+	if b.board and cfg.welcome_dwell then b.board.ui.welcome = true end
 	-- role "idle": load the mod in test mode without connecting or racing.
 	b.step = cfg.role == 'idle' and 'idle' or 'connect'
 	b.started = b.now()
@@ -54,6 +65,9 @@ function Bot.new(deps)
 	if cfg.name then b.client.name = cfg.name end
 	-- Mutation twins: deliberately break a feature so its test must fail.
 	b.game.mutations = cfg.mutations or {}
+	-- Shadow tuning: mirror our own hero beside us ({ dx, dy }) and/or rescale.
+	if b.game.shadow and type(cfg.shadow_mirror) == 'table' then b.game.shadow.mirror = cfg.shadow_mirror end
+	if b.game.shadow and type(cfg.shadow_scale) == 'number' then b.game.shadow.SCALE_OVERRIDE = cfg.shadow_scale end
 	b.game.bot_cfg = cfg
 	b.log('bot: active role=' .. tostring(cfg.role) .. ' outcome=' .. tostring(cfg.outcome))
 	b.client.on.vote_phase = function(v) b:on_vote(v) end
@@ -209,6 +223,12 @@ function Bot:reset_to_hub(now)
 end
 
 function Bot:step_wait_game(now, c)
+	local b = self.board
+	if self.cfg.welcome_dwell and b and b:is_open() and b.desc and b.desc.id == 'welcome' then
+		self.welcome_since = self.welcome_since or now
+		if now - self.welcome_since >= self.cfg.welcome_dwell then b:press('continue') end
+		return
+	end
 	if self.game:ready_for_race() and self.cfg.expect_competitive and not self.profile_checked then
 		self.profile_checked = true
 		for _, chk in ipairs(self.game:verify_competitive_profile()) do
@@ -314,9 +334,18 @@ function Bot:step_lobby(now, c, st)
 		self.pending_vote = nil
 		self:cast_vote(v)
 	end
+	-- chat_on_board: a quick line from the board's chat page during the prep time.
+	if phase == 'ready_check' and self.cfg.chat_on_board and not self.board_chatted and self.cfg.use_board then
+		self.board_chatted = true
+		self:queue_press('chat', 'say_' .. tostring(self.cfg.chat_on_board))
+	end
 	if phase == 'ready_check' and not self.readied and not self:wait_dwell('ready', now) then
 		self.readied = true
-		self:lobby_action({ 'ready' }, function() c:ready() end)
+		if self.cfg.ready_via_door then
+			self:use_route_door(c)
+		else
+			self:lobby_action({ 'ready' }, function() c:ready() end)
+		end
 	end
 	if st.race then
 		self:check('race_start', st.race.seed and st.race.seed > 0, 'seed=' .. tostring(st.race.seed))
@@ -327,6 +356,21 @@ function Bot:step_lobby(now, c, st)
 		end
 		self:go_step('countdown')
 	end
+end
+
+-- Use the voted route's exit in the Crossroads like a player pressing
+-- interact on it (the game's OnUsed path): during the prep time that readies us.
+function Bot:use_route_door(c)
+	local G = self.game.G
+	local vote = c.state.vote_results.route
+	local route = self.game.ROUTES[vote and vote.selected or ''] or self.game.ROUTES.underworld
+	local door = G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[route.door]
+	self:check('route door present', door ~= nil and door.OnUsedFunctionName ~= nil, tostring(route.door))
+	if not door then return end
+	self:check('route door prompt says ready', door.UseText == 'RankedRace_ReadyDoor', tostring(door.UseText))
+	self.log('bot: using the ' .. tostring(vote and vote.selected) .. ' door ' .. tostring(route.door))
+	local hero = G.CurrentRun and G.CurrentRun.Hero
+	G.thread(G.CallFunctionName, door.OnUsedFunctionName, door, door.OnUsedFunctionArgs, hero)
 end
 
 function Bot:step_countdown(now, c, st)
@@ -344,12 +388,25 @@ function Bot:step_wait_run(now, c, st)
 		self:check('keepsake applied', race.keepsake == '' or info.keepsake == race.keepsake,
 			string.format('game=%s race=%s', tostring(info.keepsake), tostring(race.keepsake)))
 		self.trace = { info.room }
+		if self.cfg.chat then c:chat(self.cfg.chat) end
 		self:go_step('play')
 	end
 end
 
 function Bot:step_play(now, c, st)
 	if st.result then return self:go_step('result') end
+	-- race_menu_peek: once, mid-run, open the pause menu's Race Menu and its chat page, then back.
+	if self.cfg.race_menu_peek and not self.peeked and self.rooms_done >= 1 then
+		self.peeked = true
+		self.game:request_forfeit('race')
+		self:queue_press('chat', 'back', 'keep')
+	end
+	-- Shadow check: fire the race weapon's attack through the real fire hook path.
+	local every = self.cfg.shadow_mirror and self.cfg.shadow_mirror.attack_every
+	if every and now - (self.last_fake_attack or 0) >= every then
+		self.last_fake_attack = now
+		pcall(self.game.note_fire, self.game, { name = st.race and st.race.weapon })
+	end
 	local target = self.cfg.rooms or 2
 	if self.rooms_done < target then
 		local res = self.game:bot_advance_room()
@@ -435,6 +492,13 @@ function Bot:step_result(now, c, st)
 			return
 		end
 		self:check('results screen shown', shown, b and tostring(b.rendered))
+	end
+	if self.cfg.chat then
+		local mine, theirs = false, false
+		for _, m in ipairs(st.chat or {}) do
+			if m.mine then mine = true else theirs = true end
+		end
+		self:check('chat lines delivered', mine and theirs, string.format('own=%s rival=%s', tostring(mine), tostring(theirs)))
 	end
 	if self.cfg.expect then
 		local got = r.draw and 'draw' or (r.you_won and 'win' or 'lose')

@@ -25,6 +25,9 @@ GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /Require
 # CODE=1: both clients enter the same random race code (no host).
 # SCENARIO=clear_then_forfeit: A clears first through the game's run clear
 #   screen; B is told mid-run, keeps going two more rooms, then forfeits.
+# ROUTE=surface|dream|underworld: what both bots vote for (default underworld).
+# READY_VIA_DOOR=true: bots ready up by using the route's exit, not the board's Ready.
+# BOT_EXTRA='"welcome_dwell":5': extra bot.json fields for both bots.
 # MOCKS=n: n mock racers (on this Mac) also join A's private lobby, and A starts
 #   once all 2+n are in. The mocks fall early (MOCK_DIE_AFTER s into the race,
 #   10 s apart); A clears after its rooms, B dies after its rooms.
@@ -48,7 +51,7 @@ if [ -n "${REMOTE_SERVER:-}" ]; then
   MAC_IP="${REMOTE_SERVER%:*}"; PORT="${REMOTE_SERVER##*:}"
 else
   (cd "$ROOT/server" && npm run --silent build) || fail "server build"
-  PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=${VOTE_SECONDS:-4} COUNTDOWN_MS=3000 node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
+  PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=${VOTE_SECONDS:-4} COUNTDOWN_MS=3000 ROUTES=${ROUTES:-underworld,surface,dream} node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
 fi
@@ -76,12 +79,12 @@ for X in A B; do
   [ "${CODE:-0}" = 1 ] && ROLE=code
   cat >"$RUN/bot-$X.json" <<JSON
 {"role":"$ROLE","name":"Bot$X","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
- "code_file":"Z:$TB/run/code","weapon":"WeaponAxe","keepsake":"BossPreDamageKeepsake",
+ ${BOT_EXTRA:+$BOT_EXTRA,}"code_file":"Z:$TB/run/code","route":"${ROUTE:-underworld}","ready_via_door":${READY_VIA_DOOR:-false},"chat":"gl hf from $X","weapon":"WeaponAxe","keepsake":"BossPreDamageKeepsake",
  "timeout":$((TIMEOUT - 60)),"quit_after":${QUIT_AFTER:-5},"show_ui":${SHOW_UI:-true},"dwell":${DWELL:-0},"expect_overlay":$([ "${OVERLAY:-0}" = 1 ] && echo true || echo false),"use_board":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"expect_results_screen":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"race_code":"$RACE_CODE","mutations":{$MUT_JSON},$COMP_JSON$PICK
  $EXTRA}
 JSON
   D="$(data $X)"
-  ssh "$HOST" "mkdir -p '$D' && rm -f '$D'/bot-result.txt '$D'/trace.json '$D'/ranked.log && cat > '$D/bot.json'" <"$RUN/bot-$X.json" || fail "bot.json $X"
+  ssh "$HOST" "mkdir -p '$D' && rm -f '$D'/bot-result.txt '$D'/trace.json '$D'/ranked.log '$D'/races/*.jsonl && cat > '$D/bot.json'" <"$RUN/bot-$X.json" || fail "bot.json $X"
 done
 ssh "$HOST" "rm -f '$TB/run/code'; $TB/instance.sh stop A >/dev/null; $TB/instance.sh stop B >/dev/null; $TB/instance.sh start A $GAME_ARGS && sleep 8 && $TB/instance.sh start B $GAME_ARGS" || fail "launch"
 
@@ -116,6 +119,8 @@ for X in A B; do
   D="$(data $X)"
   for f in bot-result.txt trace.json ranked.log; do scp -q "$HOST:$D/$f" "$RUN/$X-$f" 2>/dev/null; done
   scp -q "$HOST:$TB/rom-$X/ReturnOfModding/LogOutput.log" "$RUN/$X-LogOutput.log" 2>/dev/null
+  RL=$(ssh "$HOST" "ls -t '$D'/races/*.jsonl 2>/dev/null | head -1")
+  [ -n "$RL" ] && scp -q "$HOST:$RL" "$RUN/$X-race.jsonl"
 done
 ok=1
 for X in A B; do
@@ -133,6 +138,11 @@ for X in A B; do
     echo "instance $X logged UI/frame errors:"; grep "ui: \|frame error" "$RUN/$X-ranked.log" | head -5; ok=0
   fi
 done
+if [ -f "$RUN/A-race.jsonl" ] && [ -f "$RUN/B-race.jsonl" ]; then
+  echo "--- race log comparison"
+  python3 "$ROOT/scripts/compare-race-logs.py" "$RUN/A-race.jsonl" "$RUN/B-race.jsonl" >"$RUN/race-compare.txt"
+  grep -E "DIFF|^SEEDING" "$RUN/race-compare.txt"
+fi
 echo "--- trace comparison"
 python3 "$ROOT/scripts/compare-traces.py" "$RUN/A-trace.json" "$RUN/B-trace.json" $([ "${DIVERGE:-0}" = 1 ] && echo --expect-divergence) | tee "$RUN/compare.txt"
 [ $ok -eq 1 ] && echo "RESULT: PASS (two real clients)" || fail "two real clients"

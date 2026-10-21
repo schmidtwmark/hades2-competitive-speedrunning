@@ -62,7 +62,7 @@ else
 fi
 
 "$ROOT/scripts/bazzite/push.sh" >/dev/null || fail "push"
-COMPETITIVE=$COMPETITIVE python3 - "$BOT" "$PORT" "$ROOMS" "$(WIN "$TB/run/code")" "$MAC_IP" >"$RUN/bot.json" <<'EOF'
+COMPETITIVE=$COMPETITIVE BOT_EXTRA="${BOT_EXTRA:-}" python3 - "$BOT" "$PORT" "$ROOMS" "$(WIN "$TB/run/code")" "$MAC_IP" >"$RUN/bot.json" <<'EOF'
 import json, sys
 bot = json.loads(sys.argv[1])
 bot.update(role="join", server_host=sys.argv[5], server_port=int(sys.argv[2]), name="GameBot",
@@ -71,6 +71,9 @@ bot.update(role="join", server_host=sys.argv[5], server_port=int(sys.argv[2]), n
 import os
 if os.environ.get("COMPETITIVE") == "1":
     bot.update(press_competitive_after=3, expect_competitive=True, reset_to_hub=False)
+# BOT_EXTRA='{"shadow_mirror":{"dx":160}}': extra bot.json fields for one-off checks.
+if os.environ.get("BOT_EXTRA"):
+    bot.update(json.loads(os.environ["BOT_EXTRA"]))
 print(json.dumps(bot))
 EOF
 ssh "$HOST" "mkdir -p '$DATA' '$TB/run' && rm -f '$TB/run/code' '$DATA/bot-result.txt' '$DATA/trace.json' '$DATA/ranked.log' && cat > '$DATA/bot.json'" <"$RUN/bot.json" || fail "write bot.json"

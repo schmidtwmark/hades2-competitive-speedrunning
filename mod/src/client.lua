@@ -42,6 +42,7 @@ function Client.new(opts)
 		race = nil,           -- race_start message + countdown_end, started
 		-- Every other racer by id: { id, name, progress, finished, ghost, connected, present }.
 		rivals = {},
+		chat = {},            -- recent chat lines { id, name, text, at, mine }
 		result = nil,         -- race_result message
 		last_error = nil,     -- { code, message, at }
 		latency = nil,
@@ -175,6 +176,13 @@ end
 
 function Client:ready() return self:send({ type = 'ready' }) end
 
+-- A chat line to everyone in the lobby (the server echoes it back to us too).
+function Client:chat(text)
+	text = tostring(text or ''):gsub('[%c]', ' '):gsub('%s+', ' '):gsub('^ ', ''):gsub(' $', '')
+	if text == '' or not self.state.lobby then return false end
+	return self:send({ type = 'chat', text = text:sub(1, 80) })
+end
+
 -- Give up the current run: a DNF exactly like dying (the rival still has to
 -- finish to win). Stats/build ride along for the results screen.
 function Client:forfeit(stats, build)
@@ -194,6 +202,7 @@ end
 function Client:report_progress(p, force)
 	if not self:racing() then return end
 	self.pending_progress = p
+	self.state.my_progress = p
 	if force then self:_flush_progress(self.now()) end
 end
 
@@ -231,7 +240,7 @@ function Client:report_ghost(g)
 	if now - self.last_ghost_sent < GHOST_INTERVAL then return false end
 	self.last_ghost_sent = now
 	return self:send({ type = 'ghost', room = g.room, depth = g.depth, x = g.x, y = g.y, angle = g.angle, anim = g.anim,
-		t = self:race_time() })
+		act = g.act, paused = g.paused or nil, t = self:race_time() })
 end
 
 function Client:report_complete(victory, time, stats, build)
@@ -283,12 +292,18 @@ function Client:is_host()
 	return false
 end
 
--- Seconds until a Find Match lobby starts by itself (nil when not counting).
-function Client:starts_in()
-	local l = self.state.lobby
-	if not (l and type(l.starts_in) == 'number') then return nil end
-	return math.max(0, l.starts_in - (self.now() - (l.received or self.now())))
+-- Seconds left on a lobby countdown field, counted from when the state arrived.
+local function remaining(c, field)
+	local l = c.state.lobby
+	if not (l and type(l[field]) == 'number') then return nil end
+	return math.max(0, l[field] - (c.now() - (l.received or c.now())))
 end
+
+-- Seconds until a Find Match lobby starts by itself (nil when not counting).
+function Client:starts_in() return remaining(self, 'starts_in') end
+
+-- Seconds of prep left before the race starts anyway (ready check only).
+function Client:prep_left() return remaining(self, 'prep_ends_in') end
 
 -- The rival with this id (created on first sight).
 function Client:rival(id, name)
@@ -415,11 +430,11 @@ function handlers.lobby_state(c, m)
 			r.connected = p.connected ~= false
 		end
 	end
-	if m.phase ~= 'voting_weapon' and m.phase ~= 'voting_keepsake' then c.state.vote = nil end
+	if not tostring(m.phase):find('^voting_') then c.state.vote = nil end
 	if m.phase == 'racing' and c.state.race == nil and m.race then
 		-- Resumed into a running race (e.g. after a reconnect with a fresh client).
 		c.state.race = { race_id = m.race.race_id, seed = m.race.seed, weapon = m.race.weapon, keepsake = m.race.keepsake,
-			countdown_end = c.now(), started = true, resumed = true }
+			route = m.race.route, countdown_end = c.now(), started = true, resumed = true }
 	end
 	if prev and prev.phase ~= m.phase then c:_emit('phase', m.phase, prev.phase) end
 end
@@ -445,6 +460,7 @@ function handlers.race_start(c, m)
 	c.state.result = nil
 	c.last_build_key = nil
 	c.state.rivals = {} -- a new race: nobody has progress yet
+	c.state.my_progress = nil
 	c.state.mismatch = nil
 	c.state.search_since = nil
 	c.state.decided = nil
@@ -453,8 +469,8 @@ function handlers.race_start(c, m)
 	m.countdown_end = c.now() + (m.countdown_ms or 0) / 1000
 	m.started = false
 	c.state.race = m
-	c.log(string.format('race_start id=%s seed=%s weapon=%s keepsake=%s', tostring(m.race_id), tostring(m.seed),
-		tostring(m.weapon), tostring(m.keepsake)))
+	c.log(string.format('race_start id=%s seed=%s route=%s weapon=%s keepsake=%s', tostring(m.race_id), tostring(m.seed),
+		tostring(m.route), tostring(m.weapon), tostring(m.keepsake)))
 	c:_emit('race_start', m)
 end
 
@@ -498,6 +514,13 @@ function handlers.race_result(c, m)
 	c.log(string.format('race_result winner=%s reason=%s you_won=%s', tostring(m.winner_name), tostring(m.reason),
 		tostring(m.you_won)))
 	c:_emit('race_result', m)
+end
+
+function handlers.chat(c, m)
+	local chat = c.state.chat
+	chat[#chat + 1] = { id = m.id, name = m.name, text = m.text, at = c.now(), mine = m.id == c.state.id }
+	while #chat > 20 do table.remove(chat, 1) end
+	c:_emit('chat', m)
 end
 
 function handlers.error(c, m)

@@ -133,6 +133,18 @@ run mkdir -p "$PLUGINS/$GUID"
 run cp -R "$ROOT/mod/src/." "$PLUGINS/$GUID/"
 say "installed Hell2Modding + ModUtil + Ranked Race into $ROM"
 
+# Skip Hell2Modding's first-launch welcome window: it holds the controller
+# until it's dismissed, before the player ever reaches the race menu.
+GUI_CFG="$ROM/config/Hell2Modding-Hell2Modding-GUI.cfg"
+if [ "$DRY" = 1 ]; then
+  say "  (dry run) mark Hell2Modding as onboarded in $GUI_CFG"
+else
+  mkdir -p "$(dirname "$GUI_CFG")"
+  { grep -v '^onboarded[ =]' "$GUI_CFG" 2>/dev/null
+    grep -q '^is_open_at_startup' "$GUI_CFG" 2>/dev/null || echo 'is_open_at_startup = false'
+    echo 'onboarded = true'; } >"$GUI_CFG.new" && mv -f "$GUI_CFG.new" "$GUI_CFG"
+fi
+
 # The name other racers see (controller players can't type one in game).
 if [ -n "$NAME" ]; then
   printf '%s' "$NAME" | grep -Eq "^[A-Za-z0-9 _.'-]{1,24}$" || die "--name: 1-24 letters, digits, spaces or _ . ' -"

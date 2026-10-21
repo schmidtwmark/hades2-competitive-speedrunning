@@ -30,6 +30,9 @@ were re-checked against this build's own `Content/Scripts` (copied to `local/gam
 | **Native Race Board drives the whole lobby (two real clients)** | verified | `BOARD=1 CODE=1 OVERLAY=1 COMPETITIVE=1 scripts/e2e-two-games.sh 3`: both typed the same code on the on-screen keys, voted on icon grids, readied; plate + shadow checks ok; captures in local/runs/tour |
 | **Real controller input** | verified | `scripts/e2e-pad.sh`: virtual gamepad presses only (A, D-pad) -> Find Match, weapon vote Right Right A = WeaponTorch (the run started with it), Ready; run won |
 | Rival plate, shadow Melinoë, VICTORY/DEFEAT banners in game | verified | captures (local/runs/tour); bot checks: plate built per map, shadow placed with 0 error |
+| **Same offers despite different choices** | verified | `COMPETITIVE=1 DIVERGE=1 BOARD=1 READY_VIA_DOOR=true scripts/e2e-two-games.sh 9`: racers took different doors and boons at most depths; rooms, encounters (incl. Arachne), door rewards and gods, boon offers and well stock identical through depth 8 (`compare-race-logs.py`: SEEDING SAME). A 10-room run differed at one door at one depth (a reward one racer's history ruled out), then matched again |
+| **Routes: Underworld, Surface, Dream Dive** | verified | Ready at each route's Crossroads exit ("Ready to Race"); Surface starts in Ephyra with identical hub doors; Dream Dive: same seeded dream biome (Summit) and rooms through depth 6, race decided. The test bot can't clear Ephyra's pylon rooms yet |
+| **Race Menu, chat, death sequence, welcome** | verified | `PAD_SCENARIO=forfeit scripts/e2e-pad.sh`: Start -> Race Menu -> Forfeit Race -> confirm, pad presses only; bots' chat lines delivered both ways and shown in the feed; a death plays the game's death animation, then home and the results; welcome page and chat page checked in captures |
 | **Races of more than two (two real clients + two mock racers)** | verified | `MOCKS=2 COMPETITIVE=1 BOARD=1 OVERLAY=1 scripts/e2e-two-games.sh 3` (via `MOCKS=2 scripts/screenshot-tour.sh local`): 4-racer private lobby, host pressed Start Race on the board, same seed for all four, plate with three coloured rows, shadows placed, standings table on both results screens, winner completed_first |
 | **Full suite** | green | `scripts/suite.sh --game`: 9/9 gates (2026-10-20) |
 
@@ -111,6 +114,44 @@ scripts/test-sim.sh` fails.
 
 Consequences: a shop/fountain at a depth is compulsory for both players; Chaos gates are just another door.
 
+### Same offers, not just the same rooms (0.5)
+
+A real 2-player race (2026-10-20, Deck vs PC) still diverged: the same room at every depth, but Artemis
+in one racer's depth-5 room and a plain fight in the other's, Nemesis at depth 7 for one only, different
+miniboss gods, different Well of Charon stock and shop gold. Cause (research, file:line in game scripts):
+the reseeds fixed the RNG, but most picks are `GetRandomValue(eligibleList)` (UtilityLogic.lua:1026): one
+draw indexed into the list of *eligible* options, so a list one entry shorter shifts the pick. Lists
+differed because (a) encounters check the room's door reward (NemesisRandomEvent and Arachne ban
+StackUpgrade, RunLogic.lua:1687), (b) god/reward eligibility reads GameState records the race itself wrote
+(Aphrodite needs `UseRecord` Poseidon/Demeter; hammers need 4 god first-pickup lines; Hermes/Selene their
+first-pickup lines), (c) run history. `GetRandomValueFromWeightedList` also iterates `pairs()`, whose order
+can differ between two game processes.
+
+Fixes in `game.lua`:
+- **Rank picks** (`Game:rank_scope`): inside a race pick the game's `GetRandomValue`, `RemoveRandomValue` and
+  `GetRandomValueFromWeightedList` are replaced: each option scores `hash(seed, tags, pick #, name, copy #)`,
+  best eligible wins, prunes drop the worst, weighted picks use `-ln(u)/weight` (order-independent).
+  Used for: the encounter pick (one pick, then the game generates it), door rewards (keyed by the store
+  entry's reward name, not its index), the god of each loot door (`ChooseLoot`), the next room
+  (`ChooseNextRoomData`), shop/well stock (`FillInShopOptions`), boon offers and their rarity rolls
+  (`SetTraitsOnLoot`, per depth and god).
+- **Encounters fit every door:** while choosing the encounter for the room behind the doors, an encounter is
+  eligible only if it is for every door's reward (`room.ChosenRewardType` tried per reward); if none fits,
+  falls back to the taken door's reward.
+- **Seeded side rolls** (`Game:seeded_call`, like spawns): golden urns (`HandleBreakableSwap`), gold drops
+  (`CheckMoneyDrop`, per enemy name and count), object values, the Charon swap item check.
+- **Profile** (`profile.lua` `mark_story_seen`): every text line set and VO cue heard, first pickups
+  (`UseRecord`, `LootPickups`), tutorials (`Flags`), screens, objectives, quests, rooms entered, traits seen,
+  `ReachedTrueEnding` (without it the fully-heard story leaves Hecate "missing": no Erebus boss, and a Typhon
+  kill locks the Surface). So no god starts locked for one racer and not the other.
+
+What can still differ, by design: anything a racer's build rules out for them (a god after the 4-god cap, a
+boon they already have, Pom on nothing upgradable) changes that one pick only.
+
+Each race writes a choice log (`racelog.lua`: rooms, door encounters, doors, rewards, boon offers and picks,
+stock, purchases) to `plugins_data/.../races/`; `scripts/compare-race-logs.py` diffs two by depth and
+`scripts/fetch-race-logs.sh` pulls the newest from the Deck and the PC.
+
 ## Native UI: Race Board, rival plate, shadow, banners
 
 Everything a player touches is native Hades UI driven by the game's own menu
@@ -141,8 +182,26 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   compact row each in their own colour (violet, teal, gold, coral), rebuilt when the count
   changes.
 - **Shadow Melinoë** (`mod/src/shadow.lua`): `BlankObstacle3D` + GrannyModel `Melinoe_Mesh`,
-  tinted (the rival's plate colour) and alpha'd, one per rival in your room, teleported
-  toward that rival's 12 Hz ghost reports.
+  tinted (the rival's plate colour), alpha'd and scaled down (the obstacle draws the model larger
+  than the hero unit), one per rival in your room, teleported toward that rival's 12 Hz ghost
+  reports. Attacks/casts/dashes replay: the sender hooks `CheckPlayerOnFirePowers` (called by
+  `OnWeaponFired` for every hero fire), sends the weapon's `FireGraphic` (`GetWeaponDataValue`) with an
+  action counter, and the receiver `SetAnimation`s it (the game's per-weapon `SwapAnimation`s apply
+  to the shadow too). A rival whose updates stop (pause: `SessionMapState.IsPaused`, sent as
+  `paused`; or lag) stays put with "PAUSED" above her head (an overhead text on a
+  `BlankObstacleNoTimeModifier` anchor, like the game's `PopOverheadText`; the music player's pause
+  graphic doesn't draw in the world); she only goes away on a room change, a finish or a disconnect.
+  Size: scale 0.75 matches the hero (checked side by side with bot.json `shadow_mirror`).
+- **Welcome** (first board open, and the home page's About): spoiler warning for the 100%-completed
+  profile first, what the mod does, the AI disclosure and the repository link; remembered in
+  `plugins_data/.../welcome-seen`. Hell2Modding's own first-launch window is skipped by the installers
+  (`config/Hell2Modding-Hell2Modding-GUI.cfg`: `onboarded = true`). (Lua `update()` stops while the game is paused; the ImGui
+  frame callback doesn't, so the paused racer keeps reporting.)
+- **Chat** (`chatfeed.lua`, board pages, server `chat`): quick lines and an on-screen keyboard on the
+  Race Board (lobby, prep, results) and, mid-run, from the pause menu's "Race Menu" (the relabelled
+  Undo Night: Chat / Forfeit Race / Back; Quit still asks to forfeit). The server relays a line to
+  the whole lobby (sender included), 1-80 characters, one a second. The last four lines show top
+  left for 10 s, above menus.
 - **Banners** (`mod/src/banner.lua`): 3-2-1-GO from the server start time; result via
   `DisplayInfoBanner` (the biome-cleared banner).
 - **Map loads destroy objects and the engine reuses their ids.** Every object id the mod
@@ -181,7 +240,22 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   gate does not cover; both are hooked and skipped while competitive mode is active.
 - **Back home:** after a clear (clear screen closed), a forfeit or a death in a competitive
   race the mod loads Hub_PreRun directly (walk-in points 40009 -> 40012) instead of the death
-  sequence, which plays story scenes in Hub_Main and waits for input.
+  sequence, which plays story scenes in Hub_Main and waits for input. A death first plays what
+  `KillHero` does up to `DeathPresentation` (spawns stopped, `EndMusic`/`EndAmbience`, Melinoë's death
+  animation and banner), then loads the hub and releases what that presentation locked (input
+  block, mouse tether, camera, combat controls, combat UI). Back home with others still running,
+  the board opens on "Out of the Race" / "Victory": your result plus every running rival's depth,
+  biome and HP, live.
+- **Prep time and routes:** after the votes (route, weapon, keepsake) the server gives 2 minutes
+  (`prepMs`, `PREP_SECONDS`) and starts the race when everyone is ready or the time is up. The voted
+  route's Crossroads exit (DeathLoopData Hub_PreRun: Underworld door 420947 and Surface 555784 via
+  `UseEscapeDoor`, Dream door 780651 via `UseDreamRunDoor`) is hooked: during prep it reads "{I}
+  Ready to Race" and marks you ready; while a race is set up or running the exits don't start runs
+  of their own. At GO the mod calls `StartOver` with what that door passes (Surface:
+  `StartingBiome = "N", RandomOffset = 1`; Dream: `StartingRoomName = "Dream_Intro"`,
+  `RunOverrides = { IsDreamRun = true, BiomeDepthCache = 1 }`). Dream biomes (`SelectNextDreamBiome`)
+  and mid-run starting rooms are seeded per race. A hint at the bottom of the competitive hub says
+  where the board is while it's closed.
 - **Results screen:** the board's finished page compares both racers of a 1v1 like the run
   clear screen (result + time, depth, damage dealt/taken, foes slain, healing, gold, chambers,
   death defiances, boons, hammers; better value in gold; both boon lists). With three or more

@@ -126,7 +126,7 @@ function UI:draw_body()
 			ImGui.Text('Share the code ' .. lobby.code .. ' with your rivals.')
 			if c:is_host() and #names > 0 and ImGui.Button('Start race') then c:start_race() end
 		end
-	elseif phase == 'voting_weapon' or phase == 'voting_keepsake' then
+	elseif tostring(phase):find('^voting_') then
 		self:draw_vote()
 	elseif phase == 'ready_check' then
 		self:draw_ready(lobby)
@@ -175,6 +175,10 @@ function UI:draw_ready(lobby)
 	local ImGui, c = self.ImGui, self.client
 	local w = c.state.vote_results.weapon
 	local k = c.state.vote_results.keepsake
+	local route = c.state.vote_results.route
+	if route and route.selected ~= '' then ImGui.Text('Route:    ' .. tostring(route.selected)) end
+	local prep = c:prep_left()
+	if prep then ImGui.Text(string.format('Starting in %ds', math.ceil(prep))) end
 	ImGui.Text('Weapon:   ' .. (w and self.names(w.selected) or '?'))
 	ImGui.Text('Keepsake: ' .. (k and self.names(k.selected) or '-'))
 	local me_ready = false

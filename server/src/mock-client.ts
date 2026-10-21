@@ -21,6 +21,7 @@ export interface MockOptions {
   join?: string;
   joinFile?: string;
   codeFile?: string;
+  route?: string;
   weapon?: string;
   keepsake?: string;
   outcome: "win" | "die" | "none";
@@ -38,7 +39,7 @@ export interface MockOptions {
 export interface MockResult {
   ok: boolean;
   code: string | null;
-  race: { seed: number; weapon: string; keepsake: string } | null;
+  race: { seed: number; weapon: string; keepsake: string; route: string } | null;
   result: Extract<ServerMessage, { type: "race_result" }> | null;
   opponentProgress: number;
   error: string | null;
@@ -99,7 +100,7 @@ export function runMock(o: MockOptions): Promise<MockResult> {
           res.code = m.code;
           break;
         case "vote_phase": {
-          const want = m.phase === "weapon" ? o.weapon : o.keepsake;
+          const want = m.phase === "route" ? o.route : m.phase === "weapon" ? o.weapon : o.keepsake;
           const choice = want ?? m.options[0]?.id;
           if (choice) send({ type: `vote_${m.phase}`, [m.phase]: choice });
           break;
@@ -116,7 +117,7 @@ export function runMock(o: MockOptions): Promise<MockResult> {
           break;
         }
         case "race_start":
-          res.race = { seed: m.seed, weapon: m.weapon, keepsake: m.keepsake };
+          res.race = { seed: m.seed, weapon: m.weapon, keepsake: m.keepsake, route: m.route };
           timers.push(
             setTimeout(() => {
               raceStart = Date.now();
@@ -187,6 +188,7 @@ async function main() {
       join: { type: "string" },
       "join-file": { type: "string" },
       "code-file": { type: "string" },
+      route: { type: "string" },
       weapon: { type: "string" },
       keepsake: { type: "string" },
       outcome: { type: "string", default: "none" },
@@ -210,6 +212,7 @@ async function main() {
     join: values.join,
     joinFile: values["join-file"],
     codeFile: values["code-file"],
+    route: values.route,
     weapon: values.weapon,
     keepsake: values.keepsake,
     outcome,

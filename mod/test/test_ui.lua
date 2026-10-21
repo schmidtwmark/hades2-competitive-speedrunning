@@ -165,3 +165,13 @@ T.case('hud: one race clock, then the rival final time', function()
 	T.eq((Hud.delta_short(4, 6)), '2 ahead')
 	T.eq((Hud.delta_short(4, 3)), '1 behind')
 end)
+
+T.case('hud: the race clock keeps every character in a fixed cell', function()
+	local a = Hud.clock_cells('1:05.30', 1872)
+	local b = Hud.clock_cells('1:15.39', 1872)
+	for i = 1, 7 do T.eq(a[i], b[i], 'cell ' .. i) end
+	T.eq(a[7], 1872 - 23 / 2, 'last digit hugs the right margin')
+	T.truthy(a[5] - a[4] < a[3] - a[2] + 0.001, 'punctuation cells are narrower')
+	local long = Hud.clock_cells('10:05.30', 1872)
+	T.eq(long[8], a[7], 'a new leading digit does not move the others')
+end)

@@ -20,6 +20,7 @@ import {
   type BuildEntry,
   type Outcome,
   type RunStats,
+  VOTE_ORDER,
 } from "./protocol.js";
 import { type ClientVersions, compatibility, MIN_MOD_VERSION, type Mismatch, mismatchMessage, modTooOld, tooOldMessage } from "./versions.js";
 
@@ -58,10 +59,19 @@ export interface ServerOptions {
   maxPlayers?: number;
   /** Find Match: how long a lobby gathers racers after the second one arrives (default 15 s). */
   matchGatherMs?: number;
-  pools: { weapon: VoteOption[]; keepsake: VoteOption[] };
+  /** Options per vote; a missing or empty pool skips that vote. */
+  pools: Partial<Record<VotePhase, VoteOption[]>>;
+  /** After the votes: time to set Arcana/aspect/familiar before the race starts anyway (default 120 s). */
+  prepMs?: number;
   scheduler: Scheduler;
   random: Random;
   log: (line: string) => void;
+}
+
+/** The vote a lobby phase is collecting, if any. */
+function votePhaseOf(phase: LobbyPhase): VotePhase | null {
+  const m = /^voting_(.+)$/.exec(phase);
+  return m && (VOTE_ORDER as string[]).includes(m[1]!) ? (m[1] as VotePhase) : null;
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -102,8 +112,10 @@ class Lobby {
   /** Made by Find Match: starts by itself once racers have gathered. */
   isPublic = false;
   gatherEndsAt: number | null = null;
-  votes: Record<VotePhase, Map<string, string>> = { weapon: new Map(), keepsake: new Map() };
-  selected: { weapon: string | null; keepsake: string | null } = { weapon: null, keepsake: null };
+  votes: Record<VotePhase, Map<string, string>> = { route: new Map(), weapon: new Map(), keepsake: new Map() };
+  selected: Record<VotePhase, string | null> = { route: null, weapon: null, keepsake: null };
+  /** ready_check: when the race starts even if not everyone is ready. */
+  prepEndsAt: number | null = null;
   ready = new Set<string>();
   rematch = new Set<string>();
   race: RaceState | null = null;
@@ -154,6 +166,7 @@ export class Session {
   lobby: Lobby | null = null;
   graceTimer: unknown = null;
   versions: ClientVersions = { mod: null, gameBuild: null };
+  lastChat = -Infinity;
 
   constructor(readonly id: string) {}
 
@@ -209,6 +222,8 @@ export class RaceServer {
     switch (msg.type) {
       case "hello":
         return this.onHello(conn, msg.name, msg.token, { mod: msg.version ?? null, gameBuild: msg.game_build ?? null });
+      case "chat":
+        return this.onChat(s, msg.text);
       case "ping":
         return s.send({ type: "pong", t: msg.t ?? null, server_time: this.opts.scheduler.now() });
       case "create_lobby":
@@ -221,6 +236,8 @@ export class RaceServer {
         return this.onJoin(s, msg.code, msg.create === true);
       case "leave_lobby":
         return this.onLeave(s);
+      case "vote_route":
+        return this.onVote(s, "route", msg.route);
       case "vote_weapon":
         return this.onVote(s, "weapon", msg.weapon);
       case "vote_keepsake":
@@ -280,10 +297,8 @@ export class RaceServer {
       if (lobby) {
         if (!stale) for (const o of lobby.others(prev)) o.send({ type: "opponent_reconnected", ...who(prev) });
         this.broadcastState(lobby);
-        if (lobby.phase === "voting_weapon" || lobby.phase === "voting_keepsake") {
-          const phase: VotePhase = lobby.phase === "voting_weapon" ? "weapon" : "keepsake";
-          prev.send({ type: "vote_phase", phase, options: this.opts.pools[phase], timer: this.opts.voteSeconds });
-        }
+        const phase = votePhaseOf(lobby.phase);
+        if (phase) prev.send({ type: "vote_phase", phase, options: this.pool(phase), timer: this.opts.voteSeconds });
         // A race still running: replay what decided-but-unfinished state they missed.
         const race = lobby.race;
         if (race && !race.over && lobby.phase === "racing") {
@@ -532,12 +547,11 @@ export class RaceServer {
       this.broadcastState(lobby);
       return;
     }
-    const setup = lobby.phase === "voting_weapon" || lobby.phase === "voting_keepsake" || lobby.phase === "ready_check";
-    if (lobby.players.length >= 2 && (setup || lobby.phase === "finished")) {
+    const voting = votePhaseOf(lobby.phase);
+    if (lobby.players.length >= 2 && (voting || lobby.phase === "ready_check" || lobby.phase === "finished")) {
       // Enough racers left: carry on (the leaver may have been the last one we waited for).
       this.broadcastState(lobby);
-      if (lobby.phase === "voting_weapon") this.maybeResolveVote(lobby, "weapon");
-      else if (lobby.phase === "voting_keepsake") this.maybeResolveVote(lobby, "keepsake");
+      if (voting) this.maybeResolveVote(lobby, voting);
       else if (lobby.phase === "ready_check") this.maybeStartCountdown(lobby);
       else this.maybeRematch(lobby);
       return;
@@ -546,6 +560,7 @@ export class RaceServer {
     this.clearTimers(lobby);
     lobby.phase = "waiting";
     lobby.gatherEndsAt = null;
+    lobby.prepEndsAt = null;
     lobby.race = null;
     lobby.ready.clear();
     lobby.rematch.clear();
@@ -598,41 +613,55 @@ export class RaceServer {
           rematch: lobby.rematch.has(q.id),
         })),
         race: lobby.race
-          ? { race_id: lobby.race.race_id, seed: lobby.race.seed, weapon: lobby.race.weapon, keepsake: lobby.race.keepsake }
+          ? {
+              race_id: lobby.race.race_id,
+              seed: lobby.race.seed,
+              weapon: lobby.race.weapon,
+              keepsake: lobby.race.keepsake,
+              route: lobby.race.route,
+            }
           : null,
         public: lobby.isPublic,
         max_players: this.maxPlayers,
         starts_in:
           lobby.gatherEndsAt !== null ? Math.max(0, Math.ceil((lobby.gatherEndsAt - this.opts.scheduler.now()) / 1000)) : null,
+        prep_ends_in:
+          lobby.prepEndsAt !== null ? Math.max(0, Math.ceil((lobby.prepEndsAt - this.opts.scheduler.now()) / 1000)) : null,
       });
     }
   }
 
   // ---------------------------------------------------------------- voting
 
+  private pool(phase: VotePhase): VoteOption[] {
+    return this.opts.pools[phase] ?? [];
+  }
+
   private startVoting(lobby: Lobby): void {
     if (lobby.timer !== null) this.opts.scheduler.clearTimeout(lobby.timer);
     lobby.timer = null;
     lobby.gatherEndsAt = null;
-    lobby.votes.weapon.clear();
-    lobby.votes.keepsake.clear();
-    lobby.selected = { weapon: null, keepsake: null };
+    lobby.prepEndsAt = null;
+    for (const phase of VOTE_ORDER) {
+      lobby.votes[phase].clear();
+      lobby.selected[phase] = null;
+    }
     lobby.ready.clear();
     lobby.rematch.clear();
     lobby.race = null;
-    this.startVotePhase(lobby, "weapon");
+    this.startVotePhase(lobby, VOTE_ORDER[0]!);
   }
 
   private startVotePhase(lobby: Lobby, phase: VotePhase): void {
-    if (this.opts.pools[phase].length === 0) {
-      // Nothing to vote on (e.g. keepsake pool not configured): skip.
+    if (this.pool(phase).length === 0) {
+      // Nothing to vote on (e.g. no route pool configured): skip.
       lobby.selected[phase] = "";
       return this.afterVote(lobby, phase);
     }
-    lobby.phase = phase === "weapon" ? "voting_weapon" : "voting_keepsake";
+    lobby.phase = `voting_${phase}`;
     this.broadcastState(lobby);
     for (const p of lobby.players) {
-      p.send({ type: "vote_phase", phase, options: this.opts.pools[phase], timer: this.opts.voteSeconds });
+      p.send({ type: "vote_phase", phase, options: this.pool(phase), timer: this.opts.voteSeconds });
     }
     lobby.timer = this.opts.scheduler.setTimeout(() => {
       lobby.timer = null;
@@ -642,9 +671,8 @@ export class RaceServer {
 
   private onVote(s: Session, phase: VotePhase, choice: string): void {
     const lobby = s.lobby;
-    const expected = phase === "weapon" ? "voting_weapon" : "voting_keepsake";
-    if (!lobby || lobby.phase !== expected) return this.error(s, "not_voting", `Not in ${phase} vote`);
-    if (!this.opts.pools[phase].some((o) => o.id === choice)) {
+    if (!lobby || lobby.phase !== `voting_${phase}`) return this.error(s, "not_voting", `Not in ${phase} vote`);
+    if (!this.pool(phase).some((o) => o.id === choice)) {
       return this.error(s, "bad_choice", `Unknown ${phase} '${choice}'`);
     }
     lobby.votes[phase].set(s.id, choice);
@@ -668,7 +696,7 @@ export class RaceServer {
    * votes at all, a random option from the pool.
    */
   private resolveVote(lobby: Lobby, phase: VotePhase): void {
-    const pool = this.opts.pools[phase];
+    const pool = this.pool(phase);
     const counts: Record<string, number> = {};
     for (const p of lobby.players) {
       const v = lobby.votes[phase].get(p.id);
@@ -695,10 +723,20 @@ export class RaceServer {
     this.afterVote(lobby, phase);
   }
 
+  /** Next vote, or the prep time: the race starts once everyone is ready, or when it runs out. */
   private afterVote(lobby: Lobby, phase: VotePhase): void {
-    if (phase === "weapon") return this.startVotePhase(lobby, "keepsake");
+    const next = VOTE_ORDER[VOTE_ORDER.indexOf(phase) + 1];
+    if (next) return this.startVotePhase(lobby, next);
     lobby.phase = "ready_check";
     lobby.ready.clear();
+    const prepMs = this.opts.prepMs ?? 120_000;
+    lobby.prepEndsAt = this.opts.scheduler.now() + prepMs;
+    lobby.timer = this.opts.scheduler.setTimeout(() => {
+      lobby.timer = null;
+      if (lobby.phase !== "ready_check" || lobby.players.length < 2) return;
+      this.log(`lobby ${lobby.code} prep time over; starting`);
+      this.startCountdown(lobby);
+    }, prepMs);
     this.broadcastState(lobby);
   }
 
@@ -717,12 +755,16 @@ export class RaceServer {
   // ---------------------------------------------------------------- race
 
   private startCountdown(lobby: Lobby): void {
+    if (lobby.timer !== null) this.opts.scheduler.clearTimeout(lobby.timer);
+    lobby.timer = null;
+    lobby.prepEndsAt = null;
     lobby.raceCounter += 1;
     lobby.race = {
       race_id: lobby.raceCounter,
       seed: 1 + this.opts.random.int(MAX_SEED - 1),
       weapon: lobby.selected.weapon ?? "",
       keepsake: lobby.selected.keepsake ?? "",
+      route: lobby.selected.route ?? "",
       startAt: null,
       entrants: lobby.players.map((p) => ({ id: p.id, name: p.name })),
       results: new Map(),
@@ -736,7 +778,9 @@ export class RaceServer {
     };
     lobby.phase = "countdown";
     const race = lobby.race;
-    this.log(`lobby ${lobby.code} race ${race.race_id} seed=${race.seed} weapon=${race.weapon} keepsake=${race.keepsake}`);
+    this.log(
+      `lobby ${lobby.code} race ${race.race_id} seed=${race.seed} route=${race.route} weapon=${race.weapon} keepsake=${race.keepsake}`,
+    );
     this.broadcastState(lobby);
     for (const p of lobby.players) {
       p.send({
@@ -745,6 +789,7 @@ export class RaceServer {
         seed: race.seed,
         weapon: race.weapon,
         keepsake: race.keepsake,
+        route: race.route,
         countdown: Math.round(this.opts.countdownMs / 1000),
         countdown_ms: this.opts.countdownMs,
       });
@@ -773,6 +818,17 @@ export class RaceServer {
   }
 
   /** Relay only: positions are useless a moment later, so nothing is stored. */
+  /** Chat: to everyone in the lobby, the sender included; at most one line a second each. */
+  private onChat(s: Session, text: string): void {
+    const lobby = s.lobby;
+    if (!lobby) return this.error(s, "not_in_lobby", "Join a race to chat");
+    const now = this.opts.scheduler.now();
+    if (now - s.lastChat < 1000) return;
+    s.lastChat = now;
+    this.log(`lobby ${lobby.code} chat ${s.id}: ${text}`);
+    for (const p of lobby.players) p.send({ type: "chat", text, ...who(s) });
+  }
+
   private onGhost(s: Session, ghost: Ghost): void {
     const lobby = s.lobby;
     if (!lobby || lobby.phase !== "racing" || !lobby.race || lobby.race.results.has(s.id)) return;

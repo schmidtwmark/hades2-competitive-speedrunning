@@ -53,8 +53,9 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
    `--rom_enabled true` right after `%command%`.
 
 4. **Play.** Start Hades II and pick **Play Competitive Speedrun** on the title
-   screen. You arrive in the Crossroads and the Race Board opens. Everything works
-   with a controller.
+   screen. You arrive in the Crossroads and the Race Board opens (the first time
+   with a welcome page: competitive mode uses a 100% completed save, so expect
+   story spoilers). Everything works with a controller.
 
 ## Racing
 
@@ -65,24 +66,36 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
   you are the host and press **Start Race** once everyone is in. **Race by Code**
   joins a friend's code, or any code you agree on (the first to enter it opens the
   race and hosts it).
-- Vote on the weapon and keepsake (most votes wins, ties are drawn at random), set
-  your Arcana, familiar and aspect at the Crossroads (close the board with B,
-  reopen it at the Pitch-Black Stone), then **Ready**. Everyone starts the same
-  seeded run after a 3-2-1.
+- Vote on the route (Underworld, Surface or Dream Dive), the weapon and the keepsake (most
+  votes wins, ties are drawn at random).
+- Then you have **2 minutes** in the Crossroads to set your Arcana, familiar and
+  aspect (close the board with B; the hint at the bottom of the screen says where
+  to reopen it: the Pitch-Black Stone). Walk to the voted route's exit and use it
+  ("Ready to Race"), or press **Ready** on the board. The race starts as soon as
+  everyone is ready, or when the 2 minutes run out, after a 3-2-1.
 - Every racer gets the same fully upgraded profile, kept in memory only: your own
-  save is never loaded or written in competitive mode.
+  save is never loaded or written, and it can't earn achievements. It has seen
+  the whole story, so no first-meeting dialogue or tutorials play. Your Arcana,
+  familiar and aspects are remembered for next time.
 - Every room has the same layout and enemies for everyone whatever doors and
-  boons you pick; choices only change rewards.
+  boons you pick, and the same rewards, gods, shop and well stock are on offer
+  as far as your build allows; choices only change what you take.
 - One real-time race clock (top right) never pauses. Each rival shows as a shadow
-  Melinoë (in their own colour) when you share a room, plus a row on the rival
+  Melinoë (in their own colour, attacking and dashing as they do) when you share
+  a room (marked PAUSED while their game is paused), plus a row on the rival
   plate with their depth, HP and (in a 1v1) boons.
+- **Chat:** quick lines (GG, Good luck!, I'm using tilt controls, ...) or your own
+  on the on-screen keyboard, from the board's Chat button or, mid-run, the pause
+  menu's **Race Menu** (which also has Forfeit Race).
 - **Rules:** first to clear wins. Dying, **Forfeit Race** (pause menu) or
   disconnecting is a DNF: the others still have to clear to win, and if nobody
   clears it's a draw. If a rival clears first you can keep going to post your
-  time and place. When everyone is done, a results screen compares the runs.
+  time and place. If you're out while others race on, the board shows your
+  result and their progress live. When everyone is done, a results screen
+  compares the runs.
 - The public race server is the default; nothing to configure.
 - **Every racer needs matching versions:** the same Ranked Race release line
-  (e.g. any 0.4.x) and the same Hades II build. If they differ, the board says
+  (e.g. any 0.5.x) and the same Hades II build. If they differ, the board says
   "Can't race <name>" and who has to update what.
 
 ## Update
@@ -151,3 +164,4 @@ Follow these steps exactly; ask the human before anything not listed here.
 | Board: "This Ranked Race is out of date" | The server needs a newer mod: `git pull` (or a fresh ZIP) and run the installer again. |
 | Board: "Can't race X" / "Your Hades II is out of date" | Update Hades II in Steam (Library → Hades II → Update), restart the game. |
 | Board: "Can't race X" / "X's Ranked Race (or Hades II) is out of date" | Your rival has to update; search again afterwards. |
+| Two racers saw different rooms, encounters or offers | Each race writes a choice log to `ReturnOfModding/plugins_data/schmidtwmark-RankedRace/races/`. Send both racers' logs from that race (`scripts/compare-race-logs.py A.jsonl B.jsonl` shows where they differ). |

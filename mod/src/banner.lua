@@ -111,6 +111,19 @@ function Banner:announce(r, still_running)
 	})
 end
 
+-- A short in-world message (e.g. "Ready" at a run door).
+function Banner:notice(title, subtitle, good)
+	local G = self.G
+	if not (G.thread and G.DisplayInfoBanner) then return end
+	self.log('banner: ' .. tostring(title) .. ' / ' .. tostring(subtitle))
+	G.thread(G.DisplayInfoBanner, nil, {
+		Text = title, SubtitleText = subtitle, Delay = 0, Duration = 2.5, Layer = 'Overlay', FontScale = 0.8,
+		TextColor = { 254, 255, 255, 255 }, TextFadeColor = good and { 64, 230, 255, 255 } or { 235, 70, 60, 255 },
+		AnimationName = 'LocationBackingIrisGenericIn', AnimationOutName = 'LocationBackingIrisGenericOut',
+		SubtitleFont = 'SpectralSCMedium', SubtitleDelay = 0.2, SubtitleOffsetY = 10,
+	})
+end
+
 function Banner:update()
 	if self.disabled or not self.G.MapState then return end
 	local ok, err = pcall(self.tick, self)

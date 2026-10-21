@@ -3,6 +3,20 @@ import type { VoteOption } from "./protocol.js";
 // Internal names are what the mod passes to the game. Keep these in sync with
 // the game's WeaponData / TraitData (see NOTES.md for where each name was read).
 
+// Where the run goes. The mod maps each id to the game's start in the Crossroads.
+export const ALL_ROUTES: VoteOption[] = [
+  { id: "underworld", name: "Underworld" },
+  { id: "surface", name: "Surface" },
+  { id: "dream", name: "Dream Dive" },
+];
+
+/** The routes on offer: all of ALL_ROUTES, or the ids in `list` ("underworld,surface"). */
+export function routes(list?: string): VoteOption[] {
+  if (!list) return ALL_ROUTES;
+  const ids = list.split(",").map((x) => x.trim());
+  return ALL_ROUTES.filter((r) => ids.includes(r.id));
+}
+
 export const WEAPONS: VoteOption[] = [
   { id: "WeaponStaffSwing", name: "Witch's Staff" },
   { id: "WeaponDagger", name: "Sister Blades" },

@@ -4,7 +4,9 @@
 
 export const PROTOCOL_VERSION = 1;
 
-export type VotePhase = "weapon" | "keepsake";
+/** Voted in this order: where the run goes, then the weapon, then the keepsake. */
+export type VotePhase = "route" | "weapon" | "keepsake";
+export const VOTE_ORDER: VotePhase[] = ["route", "weapon", "keepsake"];
 
 export interface VoteOption {
   id: string;
@@ -43,6 +45,10 @@ export interface Ghost {
   y: number;
   angle?: number;
   anim?: string;
+  /** Counts the racer's attacks/dashes, so a repeat of the same animation replays. */
+  act?: number;
+  /** The racer has the game paused (their shadow freezes with a pause icon). */
+  paused?: boolean;
   t: number;
 }
 
@@ -55,8 +61,10 @@ export type ClientMessage =
   /** create: if no lobby has this code yet, open one under it and wait (both racers can type an agreed code). */
   | { type: "join_lobby"; code: string; create?: boolean }
   | { type: "leave_lobby" }
+  | { type: "vote_route"; route: string }
   | { type: "vote_weapon"; weapon: string }
   | { type: "vote_keepsake"; keepsake: string }
+  /** Ready for the start (in game: activating the voted route's start in the Crossroads). */
   | { type: "ready" }
   | ({ type: "progress_update" } & Progress)
   | { type: "run_complete"; time: number; victory: boolean; stats?: RunStats; build?: BuildEntry[] }
@@ -66,10 +74,13 @@ export type ClientMessage =
   | { type: "rematch" }
   /** Host of a private lobby: stop waiting for more racers and start voting. */
   | { type: "start_race" }
+  /** A chat line to everyone in the lobby (quick line or typed, 1-80 characters). */
+  | { type: "chat"; text: string }
   | { type: "ping"; t?: number };
 
 export type LobbyPhase =
   | "waiting"
+  | "voting_route"
   | "voting_weapon"
   | "voting_keepsake"
   | "ready_check"
@@ -129,6 +140,8 @@ export interface RaceSetup {
   seed: number;
   weapon: string;
   keepsake: string;
+  /** Voted route id ("underworld", "surface", ...); "" when routes aren't voted on. */
+  route: string;
 }
 
 export type ServerMessage =
@@ -149,6 +162,8 @@ export type ServerMessage =
       max_players: number;
       /** Find Match lobbies: seconds until voting starts, once two racers are in. */
       starts_in: number | null;
+      /** ready_check: seconds until the race starts anyway (prep time for Arcana, aspect, familiar). */
+      prep_ends_in: number | null;
     }
   | { type: "lobby_left" }
   | { type: "vote_phase"; phase: VotePhase; options: VoteOption[]; timer: number }
@@ -184,6 +199,8 @@ export type ServerMessage =
    * version_mismatch: can't race `rival`; `who` must update `what` ("you", "rival" or "both").
    */
   | { type: "error"; message: string; code: string; who?: "you" | "rival" | "both"; what?: "mod" | "game"; rival?: string }
+  /** A chat line from someone in the lobby (also echoed to the sender). */
+  | ({ type: "chat"; text: string } & Who)
   | { type: "pong"; t: number | null; server_time: number };
 
 export class ProtocolError extends Error {
@@ -193,6 +210,14 @@ export class ProtocolError extends Error {
   ) {
     super(message);
   }
+}
+
+/** Chat text: control characters removed, whitespace collapsed, 1-80 characters. */
+function chatText(o: Record<string, unknown>): string {
+  const raw = typeof o.text === "string" ? o.text : "";
+  const text = raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  if (text.length === 0 || text.length > 80) throw new ProtocolError("bad_field", "chat text must be 1-80 characters");
+  return text;
 }
 
 function str(o: Record<string, unknown>, key: string, max = 64): string {
@@ -284,6 +309,8 @@ export function parseClientMessage(raw: unknown): ClientMessage {
       return { type, stats: optStats(o), build: optBuild(o) };
     case "join_lobby":
       return { type, code: str(o, "code", 16).toUpperCase(), ...(o.create === true ? { create: true } : {}) };
+    case "vote_route":
+      return { type, route: str(o, "route") };
     case "vote_weapon":
       return { type, weapon: str(o, "weapon") };
     case "vote_keepsake":
@@ -310,10 +337,14 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         y: num(o, "y"),
         angle: optNum(o, "angle"),
         anim: optStr(o, "anim"),
+        act: optNum(o, "act"),
+        paused: o.paused === true ? true : undefined,
         t: num(o, "t"),
       };
     case "run_complete":
       return { type, time: num(o, "time"), victory: bool(o, "victory"), stats: optStats(o), build: optBuild(o) };
+    case "chat":
+      return { type, text: chatText(o) };
     case "ping":
       return { type, t: optNum(o, "t") };
     default:

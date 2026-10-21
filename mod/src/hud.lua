@@ -29,6 +29,11 @@ local GROUP = 'Combat_UI'
 local CLOCK_GROUP = 'Combat_Menu_TraitTray_Overlay' -- above menus: the clock never hides
 local MARGIN = 48         -- from the right edge
 local CLOCK_Y = 34
+-- The clock's font has proportional digits, so a single right-aligned text
+-- shifts every time a digit changes. Each character gets its own fixed cell.
+local CLOCK_CELLS = 9       -- up to "180:00.00" (the race time limit)
+local CLOCK_DIGIT_W = 23
+local CLOCK_PUNCT_W = 11
 local TOP = 92            -- rival plate, under the race clock
 local BAR_SCALE = 0.32    -- HPBarFill is the player's bar, ~1050 px wide at 1.0
 local BAR_WIDTH = 1050 * BAR_SCALE
@@ -322,28 +327,58 @@ end
 function Hud:destroy_clock()
 	local ms = self.G.MapState
 	if ms and ms.RankedRaceClock then
-		pcall(self.G.Destroy, { Id = ms.RankedRaceClock })
+		pcall(self.G.Destroy, { Ids = ms.RankedRaceClock.ids })
 		ms.RankedRaceClock = nil
 	end
+end
+
+-- Cell centres for a clock string, right to left from the right margin, so
+-- digits never move: "12:34.56" -> one x per character.
+function Hud.clock_cells(text, right)
+	local xs, x = {}, right
+	for i = #text, 1, -1 do
+		local w = text:sub(i, i):match('%d') and CLOCK_DIGIT_W or CLOCK_PUNCT_W
+		xs[i] = x - w / 2
+		x = x - w
+	end
+	return xs
 end
 
 -- The one race timer: real time since the start (the server's clock is the
 -- official one), never paused for menus or boon choices, always on top.
 function Hud:update_clock()
 	local G, ms = self.G, self.G.MapState
-	local id = ms.RankedRaceClock
-	if not id then
-		id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = CLOCK_GROUP, X = (G.ScreenWidth or 1920) - MARGIN, Y = CLOCK_Y })
-		local a = text_args(id, 'NumericP22UndergroundSCHeavy', 36, 'Right', WHITE)
-		a.DataProperties = nil
-		G.CreateTextBox(a)
-		ms.RankedRaceClock = id
+	local clock = ms.RankedRaceClock
+	local now = self.now()
+	if clock and now - (self.last_clock or 0) < 0.05 then return end
+	self.last_clock = now
+	local text = fmt_time(self.client:race_time())
+	if #text > CLOCK_CELLS then text = text:sub(-CLOCK_CELLS) end
+	-- Rebuild when the layout changes (e.g. 9:59.99 -> 10:00.00); otherwise
+	-- only touch the characters that changed.
+	if clock and clock.len ~= #text then
+		self:destroy_clock()
+		clock = nil
+	end
+	if not clock then
+		clock = { ids = {}, chars = {}, len = #text }
+		local xs = Hud.clock_cells(text, (G.ScreenWidth or 1920) - MARGIN)
+		for i = 1, #text do
+			local id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = CLOCK_GROUP, X = xs[i], Y = CLOCK_Y })
+			local a = text_args(id, 'NumericP22UndergroundSCHeavy', 36, 'Center', WHITE)
+			a.DataProperties = nil
+			G.CreateTextBox(a)
+			clock.ids[i] = id
+		end
+		ms.RankedRaceClock = clock
 		self.stats.clocks = (self.stats.clocks or 0) + 1
 	end
-	local now = self.now()
-	if now - (self.last_clock or 0) >= 0.05 then
-		self.last_clock = now
-		G.ModifyTextBox({ Id = id, Text = fmt_time(self.client:race_time()), AutoSetDataProperties = false })
+	for i = 1, #text do
+		local ch = text:sub(i, i)
+		if clock.chars[i] ~= ch then
+			clock.chars[i] = ch
+			G.ModifyTextBox({ Id = clock.ids[i], Text = ch, AutoSetDataProperties = false })
+		end
 	end
 end
 

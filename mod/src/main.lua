@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.4.0'
+local VERSION = '0.5.0'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -31,7 +31,9 @@ local Profile = import('profile.lua')
 local Shadow = import('shadow.lua')
 local Hud = import('hud.lua')
 local Board = import('board.lua')
+local RaceLog = import('racelog.lua')
 local Banner = import('banner.lua')
+local ChatFeed = import('chatfeed.lua')
 
 -- logging: H2M's log plus our own file, flushed per line -----------------------
 
@@ -89,6 +91,29 @@ end
 -- wiring ------------------------------------------------------------------------
 
 local game = Game.new({ rom = rom, modutil = rom.mods['SGG_Modding-ModUtil'], log = log, now = socket.gettime, profile = Profile })
+-- The racer's competitive loadout (Arcana, familiar, aspects) across sessions.
+local loadout_path = data_dir .. '/loadout.json'
+do
+	local f = io.open(loadout_path, 'r')
+	if f then
+		local ok, saved = pcall(json.decode, f:read('*a'))
+		f:close()
+		if ok and type(saved) == 'table' then game.saved_loadout = saved end
+	end
+end
+game.save_loadout = function(loadout)
+	game.saved_loadout = loadout
+	local f = io.open(loadout_path, 'w')
+	if f then
+		f:write(json.encode(loadout))
+		f:close()
+	end
+end
+
+-- Per-race choice logs for comparing racers' runs (scripts/compare-race-logs.py).
+local races_dir = data_dir .. '/races'
+if rom.path and rom.path.create_directory then pcall(rom.path.create_directory, races_dir) end
+game.racelog = RaceLog.new({ dir = races_dir, json = json, now = socket.gettime, log = log })
 
 local client = Client.new({
 	json = json, transport = Net.new(socket, log), now = socket.gettime, log = log,
@@ -112,11 +137,27 @@ local hud = Hud.new({ G = rom.game, log = log, client = client, game = game, now
 game.shadow, game.hud = shadow, hud
 
 -- Before/after a race: the native Race Board (controller-first) and banners.
+Board.biome = Hud.biome_name
 local board = Board.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime,
 	names = function(id) return game:display_name(id) end })
 board:install()
+-- The welcome page shows once per install (spoilers, what the mod is, AI disclosure).
+local welcome_path = data_dir .. '/welcome-seen'
+do
+	local f = io.open(welcome_path, 'r')
+	board.ui.welcome = f == nil
+	if f then f:close() end
+end
+board.on_welcome_seen = function()
+	local f = io.open(welcome_path, 'w')
+	if f then
+		f:write('seen\n')
+		f:close()
+	end
+end
 local banner = Banner.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime })
-game.board = board
+local chatfeed = ChatFeed.new({ G = rom.game, log = log, client = client, now = socket.gettime })
+game.board, game.banner = board, banner
 
 local ui = UI.new({
 	ImGui = rom.ImGui, ImGuiCond = rom.ImGuiCond, ImGuiWindowFlags = rom.ImGuiWindowFlags,
@@ -156,7 +197,8 @@ if not guard_ok then log('competitive: save guard failed: ' .. tostring(guard_er
 local pause_ok, pause_err = pcall(competitive.install_pause_hooks, competitive, {
 	give_up = function() return game:competitive_active() or game:forfeit_available() end,
 	quit = function() return game:forfeit_available() end,
-	forfeit_prompt = function() game:request_forfeit() end,
+	-- Undo Night opens the race menu (chat, forfeit); Quit asks to forfeit.
+	forfeit_prompt = function(what) game:request_forfeit(what == 'Quit' and 'forfeit' or 'race') end,
 })
 if not pause_ok then log('competitive: pause hooks failed: ' .. tostring(pause_err)) end
 if menu_ok and bot.active and bot.cfg.press_competitive_after then
@@ -198,6 +240,7 @@ local function frame()
 	hud:update()
 	board:update(game:competitive_active() and game:in_hub())
 	banner:update()
+	chatfeed:update()
 	bot:update()
 	-- Competitive mode is all native UI; the ImGui HUD is for races from your own save.
 	if not hud:active() and not game:competitive_active() then ui:draw_hud() end

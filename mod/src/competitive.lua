@@ -34,7 +34,7 @@ local PAUSE_QUIT_SIG = '48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41
 local PAUSE_RESUME_SIG = '48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 40 48 8B F9 C6 44 24 20 00 C6 44 24 37 17 48 8D 2D B8 E3 35 00'
 local TEXT_ID = 'MainMenuScreen_CompetitiveSpeedrun'
 local LABEL = 'Play Competitive Speedrun'
-local FORFEIT_LABEL = 'Forfeit Race'
+local FORFEIT_LABEL = 'Race Menu'
 local FORFEIT_HINT = 'end your run? your rival still has to finish to win'
 
 function Competitive.new(deps)
@@ -90,7 +90,7 @@ local function patch_shell_text(text)
 end
 
 -- ScreenText.<lang>.sjson: in-world prompts (the Race Board's "{I} Race").
-local SCREEN_TEXTS = { { 'RankedRace_UseBoard', '{I} Race' } }
+local SCREEN_TEXTS = { { 'RankedRace_UseBoard', '{I} Race' }, { 'RankedRace_ReadyDoor', '{I} Ready to Race' } }
 local function patch_screen_text(text)
 	if text:find(SCREEN_TEXTS[1][1], 1, true) then return nil end
 	local _, open_end = text:find('Texts%s*=%s*%[')
@@ -199,8 +199,8 @@ function Competitive:install_save_guard(active)
 	return guarded == 2
 end
 
--- Pause menu during a race: "Undo Night" (relabelled "Forfeit Race") and Quit
--- open the mod's forfeit prompt instead of their normal action when
+-- Pause menu during a race: "Undo Night" (relabelled "Race Menu": chat,
+-- forfeit) and Quit open the mod's prompts instead of their normal action when
 -- h.give_up() / h.quit() say so; the pause menu is closed like Continue does.
 function Competitive:install_pause_hooks(h)
 	local _ = _ENV
@@ -224,8 +224,8 @@ function Competitive:install_pause_hooks(h)
 				function(_, screen)
 					local ok, yes = pcall(take)
 					if not (ok and yes) then return true end
-					log('competitive: pause menu ' .. what .. ' -> forfeit prompt')
-					local rok, rerr = pcall(h.forfeit_prompt)
+					log('competitive: pause menu ' .. what .. ' -> race prompt')
+					local rok, rerr = pcall(h.forfeit_prompt, what)
 					if not rok then log('competitive: forfeit prompt failed: ' .. tostring(rerr)) end
 					if resume then pcall(resume, screen:get()) end
 					return false

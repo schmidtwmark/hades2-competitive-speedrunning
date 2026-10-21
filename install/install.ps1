@@ -151,6 +151,18 @@ try {
     }
     Say "installed Hell2Modding + ModUtil + Ranked Race into $Rom"
 
+    # Skip Hell2Modding's first-launch welcome window: it holds the controller
+    # until it's dismissed, before the player ever reaches the race menu.
+    $guiCfg = Join-Path $Rom "config\Hell2Modding-Hell2Modding-GUI.cfg"
+    Act "mark Hell2Modding as onboarded in $guiCfg" {
+        New-Item -ItemType Directory -Force -Path (Split-Path $guiCfg) | Out-Null
+        $lines = @()
+        if (Test-Path $guiCfg) { $lines = @(Get-Content $guiCfg | Where-Object { $_ -notmatch '^onboarded[ =]' }) }
+        if (-not ($lines | Where-Object { $_ -match '^is_open_at_startup' })) { $lines += 'is_open_at_startup = false' }
+        $lines += 'onboarded = true'
+        [IO.File]::WriteAllText($guiCfg, (($lines -join "`n") + "`n"))
+    }
+
     # The name other racers see (controller players can't type one in game).
     if ($Name) {
         if ($Name -notmatch "^[A-Za-z0-9 _.'-]{1,24}$") { Die "-Name: 1-24 letters, digits, spaces or _ . ' -" }

@@ -18,8 +18,23 @@ local EXCLUDED_WORLD_UPGRADES = {
 	WorldUpgradeStoryReset = true,
 }
 
--- Story records that would otherwise force the prologue / intro rooms.
-local STORY_RECORDS = { 'HecateHideAndSeekIntro01', 'ChronosNightmare01', 'ApolloFirstPickUp', 'ZeusFirstPickUp' }
+-- Data tables whose dialogue and voice lines count as already heard: the
+-- competitive profile has seen every story beat, so no first-meeting lines,
+-- discovery barks or arrival cutscenes play, and nothing story-gated (Hermes,
+-- Selene, hammers, Nectar, Dream Dive) stays locked.
+local STORY_TABLES = { 'EnemyData', 'LootData', 'NPCVariantData', 'ConsumableData', 'RoomData', 'HubRoomData',
+	'EncounterData', 'ObstacleData', 'GlobalVoiceLines', 'HeroVoiceLines', 'HeroRepeatableTextLines', 'PresetEventArgs',
+	'TraitData', 'WeaponData', 'FamiliarData', 'ResourceData', 'WorldUpgradeData', 'QuestData', 'BountyData',
+	'ScreenData', 'StoreData', 'RewardData' }
+-- Keys whose values are named text line sets.
+local SET_KEYS = { InteractTextLineSets = true, GiftTextLineSets = true, BossIntroTextLineSets = true,
+	BossOutroTextLineSets = true, BossPhaseChangeTextLineSets = true, DeathPresentationTextLineSets = true,
+	CombatIntroTextLineSets = true, OnHitTextLineSets = true, RejectionTextLines = true, MakeUpTextLines = true,
+	BoughtTextLines = true, DuoPickupTextLines = true, PostPortraitTextLines = true, TextLineSet = true }
+-- One-time tutorials and hints (GameState.Flags).
+local TUTORIAL_FLAGS = { 'SeenElementalIcons', 'SeenUnityBoons', 'HasPinnedAnyBoon', 'HasUpgradedCards',
+	'InspectedMetaUpgrade', 'SecondUpgradeReminder', 'MetaUpgradeExpandPsycheHint', 'HasUsedSaveFirstSystem',
+	'HasUsedWeaponShopNavigation', 'HasMultiPlanted', 'HasShuffledMusicPlayer' }
 
 -- Completed runs recorded in history; feeds GetCompletedRuns-based eligibility.
 local STUB_RUNS = 50
@@ -43,8 +58,117 @@ local function sorted_keys(t)
 	return keys
 end
 
+-- Mark every text line set and voice cue the game knows as already played,
+-- plus first pickups, tutorials, first screens, objectives and quests. The
+-- true ending counts as reached (every 100% save is in that state): without
+-- it the fully-heard story leaves Hecate "missing" (no Erebus boss fight) and
+-- a Typhon kill would lock the Surface route. Returns the line-set count.
+function Profile.mark_story_seen(G, GS)
+	GS.TextLinesRecord = GS.TextLinesRecord or {}
+	GS.SpeechRecord = GS.SpeechRecord or {}
+	GS.SpeechRecordContexts = GS.SpeechRecordContexts or {}
+	local seen, sets = {}, 0
+	local function mark_set(name)
+		if not GS.TextLinesRecord[name] then sets = sets + 1 end
+		GS.TextLinesRecord[name] = true
+	end
+	local function walk(t, ctx)
+		if seen[t] then return end
+		seen[t] = true
+		if type(rawget(t, 'PlayOnceContext')) == 'string' then ctx = rawget(t, 'PlayOnceContext') end
+		local cue = rawget(t, 'Cue')
+		if type(cue) == 'string' and cue:sub(1, 4) == '/VO/' then
+			GS.SpeechRecord[cue] = GS.SpeechRecord[cue] or 1
+			if ctx then
+				GS.SpeechRecordContexts[ctx] = GS.SpeechRecordContexts[ctx] or {}
+				GS.SpeechRecordContexts[ctx][cue] = true
+			end
+		end
+		for k, v in pairs(t) do
+			if type(v) == 'table' then
+				if SET_KEYS[k] then
+					for name, set in pairs(v) do
+						if type(name) == 'string' and type(set) == 'table' then mark_set(name) end
+					end
+				end
+				walk(v, ctx)
+			end
+		end
+	end
+	for name in pairs(G.TextLinesCache or {}) do
+		if type(name) == 'string' then mark_set(name) end
+	end
+	for _, name in ipairs(STORY_TABLES) do
+		if type(G[name]) == 'table' then walk(G[name]) end
+	end
+	GS.ReachedTrueEnding = true
+	GS.UseRecord = GS.UseRecord or {}
+	GS.LootPickups = GS.LootPickups or {}
+	for name in pairs(G.LootData or {}) do
+		GS.UseRecord[name] = math.max(GS.UseRecord[name] or 0, 4)
+		GS.LootPickups[name] = math.max(GS.LootPickups[name] or 0, 10)
+	end
+	for name in pairs(G.ConsumableData or {}) do GS.UseRecord[name] = math.max(GS.UseRecord[name] or 0, 4) end
+	GS.Flags = GS.Flags or {}
+	for _, flag in ipairs(TUTORIAL_FLAGS) do GS.Flags[flag] = true end
+	GS.ScreensViewed = GS.ScreensViewed or {}
+	for name in pairs(G.ScreenData or {}) do GS.ScreensViewed[name] = true end
+	GS.CompletedObjectiveSets = GS.CompletedObjectiveSets or {}
+	for name in pairs(G.ObjectiveSetData or {}) do GS.CompletedObjectiveSets[name] = true end
+	GS.QuestStatus, GS.QuestsCompleted, GS.QuestsViewed = GS.QuestStatus or {}, GS.QuestsCompleted or {}, GS.QuestsViewed or {}
+	for _, quest in ipairs(G.QuestOrderData or {}) do
+		GS.QuestStatus[quest] = 'CashedOut'
+		GS.QuestsCompleted[quest] = true
+		GS.QuestsViewed[quest] = true
+	end
+	GS.RoomsEntered = GS.RoomsEntered or {}
+	for name in pairs(G.RoomData or {}) do GS.RoomsEntered[name] = math.max(GS.RoomsEntered[name] or 0, 10) end
+	GS.TraitsSeen = GS.TraitsSeen or {}
+	for name in pairs(G.TraitData or {}) do GS.TraitsSeen[name] = true end
+	GS.LifetimeResourcesGained = GS.LifetimeResourcesGained or {}
+	GS.LifetimeResourcesGained.MetaCurrency = math.max(GS.LifetimeResourcesGained.MetaCurrency or 0, 1000)
+	-- A Dream Dive's first biome avoids the last dive's: no last dive.
+	GS.LastDreamStartingBiome = nil
+	return sets
+end
+
+-- The racer's own picks from earlier sessions (main.lua keeps them in the
+-- mod's data folder): equipped Arcana within the Grasp limit, the familiar
+-- and each weapon's aspect. Returns how many Arcana were equipped.
+function Profile.apply_loadout(G, GS, saved)
+	if type(saved) ~= 'table' then return 0 end
+	local budget, n = G.GetMaxMetaUpgradeCost and G.GetMaxMetaUpgradeCost() or 0, 0
+	for _, name in ipairs(type(saved.arcana) == 'table' and saved.arcana or {}) do
+		local data, state = G.MetaUpgradeCardData[name], GS.MetaUpgradeState[name]
+		local cost = type(data) == 'table' and (data.Cost or 0) or nil
+		if state and state.Unlocked and cost and cost <= budget then
+			state.Equipped = true
+			budget = budget - cost
+			n = n + 1
+		end
+	end
+	if G.UpdateMetaUpgradeCardAdjacencyBonuses then pcall(G.UpdateMetaUpgradeCardAdjacencyBonuses) end
+	if type(saved.familiar) == 'string' and GS.FamiliarsUnlocked[saved.familiar] then GS.EquippedFamiliar = saved.familiar end
+	for weapon, aspect in pairs(type(saved.aspects) == 'table' and saved.aspects or {}) do
+		if type(aspect) == 'string' and G.TraitData and G.TraitData[aspect] then GS.LastWeaponUpgradeName[weapon] = aspect end
+	end
+	return n
+end
+
+-- What apply_loadout restores, read from the current profile.
+function Profile.capture_loadout(GS)
+	local out = { arcana = {}, aspects = {}, familiar = GS.EquippedFamiliar }
+	for name, state in pairs(GS.MetaUpgradeState or {}) do
+		if type(state) == 'table' and state.Equipped then out.arcana[#out.arcana + 1] = name end
+	end
+	table.sort(out.arcana)
+	for weapon, aspect in pairs(GS.LastWeaponUpgradeName or {}) do out.aspects[weapon] = aspect end
+	return out
+end
+
 -- Returns a summary table (counts per category) for logs and tests.
-function Profile.build(G)
+-- `saved`: the racer's loadout from an earlier session (optional).
+function Profile.build(G, saved)
 	local summary = {}
 
 	-- Mirror StartNewGame, but start the bookkeeping run in a real room so
@@ -140,10 +264,12 @@ function Profile.build(G)
 	GS.SpentShrinePointsCache = 0
 	GS.EasyModeLevel = 0
 
-	-- Skip the prologue and the forced intro encounters.
-	for _, record in ipairs(STORY_RECORDS) do GS.TextLinesRecord[record] = true end
-	GS.UseRecord.HermesUpgrade = 1
-	GS.UseRecord.ApolloUpgrade = 1
+	-- Every aspect equipped as the weapon's base aspect (at rank V) until the
+	-- player picks another; with nothing set, runs use a bonus-less dummy.
+	for weapon, aspect in pairs(free or {}) do GS.LastWeaponUpgradeName[weapon] = aspect end
+
+	-- Seen everything: story, dialogue, voice lines, tutorials, first pickups.
+	summary.story_lines = Profile.mark_story_seen(G, GS)
 	for _, encounter in ipairs(sorted_keys(G.EncounterData)) do
 		GS.EncountersCompletedCache[encounter] = 1
 		GS.EncountersOccurredCache[encounter] = 1
@@ -156,6 +282,11 @@ function Profile.build(G)
 		G.CurrentRun = {}
 		G.RunStateInit()
 		G.CurrentRun.Hero = {}
+		-- Story rooms forced until seen within N runs: seen in every run.
+		G.CurrentRun.RoomsEntered = G.CurrentRun.RoomsEntered or {}
+		for name, room in pairs(G.RoomData or {}) do
+			if type(room) == 'table' and room.ForceIfUnseenForRuns then G.CurrentRun.RoomsEntered[name] = 1 end
+		end
 		table.insert(GS.RunHistory, G.CurrentRun)
 		G.CurrentRun = saved
 	end
@@ -163,6 +294,7 @@ function Profile.build(G)
 	GS.GamePhase = 5
 	GS.GamePhaseRunsRemaining = 2
 	GS.NextBiomeStateName = nil
+	summary.saved_arcana = Profile.apply_loadout(G, GS, saved)
 	return summary
 end
 

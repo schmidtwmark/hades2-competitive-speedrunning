@@ -1,4 +1,4 @@
-import { KEEPSAKES, WEAPONS } from "./pools.js";
+import { KEEPSAKES, routes, WEAPONS } from "./pools.js";
 import { RaceServer, realRandom, realScheduler } from "./race-server.js";
 import { listen } from "./tcp.js";
 
@@ -15,7 +15,8 @@ const server = new RaceServer({
   idleLobbyMs: Number(env.IDLE_LOBBY_MS ?? 30 * 60 * 1000),
   maxPlayers: Number(env.MAX_PLAYERS ?? 5),
   matchGatherMs: Number(env.MATCH_GATHER_MS ?? 15_000),
-  pools: { weapon: WEAPONS, keepsake: KEEPSAKES },
+  pools: { route: routes(env.ROUTES), weapon: WEAPONS, keepsake: KEEPSAKES },
+  prepMs: Number(env.PREP_SECONDS ?? 120) * 1000,
   scheduler: realScheduler,
   random: realRandom,
   log,

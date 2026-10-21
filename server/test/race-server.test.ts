@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { TestClient, group, makeServer, pair, racing, racingGroup } from "./helpers.js";
+import { TEST_KEEPSAKES, TEST_WEAPONS, TestClient, group, makeServer, pair, racing, racingGroup } from "./helpers.js";
 
 describe("session", () => {
   it("requires hello before anything else", () => {
@@ -707,5 +707,84 @@ describe("join by code (create if missing)", () => {
     c.hello();
     c.send({ type: "join_lobby", code, create: true });
     assert.equal(c.last("error").code, "lobby_busy");
+  });
+});
+
+describe("route vote and prep time", () => {
+  const ROUTES = [
+    { id: "underworld", name: "Underworld" },
+    { id: "surface", name: "Surface" },
+  ];
+  const withRoutes = { pools: { route: ROUTES, weapon: TEST_WEAPONS, keepsake: TEST_KEEPSAKES }, prepMs: 120_000 };
+
+  it("votes route, then weapon, then keepsake; the race carries the route", () => {
+    const { cs } = group(3, withRoutes);
+    const [a, b, c] = cs as [TestClient, TestClient, TestClient];
+    assert.equal(a.state().phase, "voting_route");
+    assert.deepEqual(a.last("vote_phase").options.map((o) => o.id), ["underworld", "surface"]);
+    a.send({ type: "vote_route", route: "surface" });
+    b.send({ type: "vote_route", route: "surface" });
+    c.send({ type: "vote_route", route: "underworld" });
+    assert.equal(a.last("vote_result").selected, "surface");
+    assert.equal(a.state().phase, "voting_weapon");
+    for (const x of cs) x.send({ type: "vote_weapon", weapon: "WeaponAxe" });
+    for (const x of cs) x.send({ type: "vote_keepsake", keepsake: "KeepsakeA" });
+    assert.equal(a.state().phase, "ready_check");
+    assert.equal(a.state().prep_ends_in, 120);
+    for (const x of cs) x.send({ type: "ready" });
+    assert.equal(a.last("race_start").route, "surface");
+    assert.equal(a.state().race?.route, "surface");
+    assert.equal(a.state().prep_ends_in, null);
+  });
+
+  it("starts by itself when the prep time runs out, ready or not", () => {
+    const { cs, scheduler } = group(2, withRoutes);
+    const [a, b] = cs as [TestClient, TestClient];
+    for (const x of cs) x.send({ type: "vote_route", route: "underworld" });
+    for (const x of cs) x.send({ type: "vote_weapon", weapon: "WeaponAxe" });
+    for (const x of cs) x.send({ type: "vote_keepsake", keepsake: "KeepsakeB" });
+    a.send({ type: "ready" });
+    scheduler.advance(60_000);
+    assert.equal(b.state().phase, "ready_check", "one racer ready is not enough");
+    scheduler.advance(60_000);
+    assert.equal(b.state().phase, "countdown");
+    assert.equal(b.last("race_start").route, "underworld");
+    scheduler.advance(3000);
+    assert.equal(b.state().phase, "racing");
+  });
+
+  it("an unknown route is refused; without a route pool the vote is skipped", () => {
+    const { cs } = group(2, withRoutes);
+    cs[0]!.send({ type: "vote_route", route: "olympus" });
+    assert.equal(cs[0]!.last("error").code, "bad_choice");
+    const plain = group(2);
+    assert.equal(plain.cs[0]!.state().phase, "voting_weapon");
+  });
+});
+
+describe("chat", () => {
+  it("goes to everyone in the lobby with the sender's name, at most one line a second", () => {
+    const { cs, scheduler } = group(3);
+    const [a, b, c] = cs as [TestClient, TestClient, TestClient];
+    b.send({ type: "chat", text: "  good   luck\n all " });
+    for (const x of cs) assert.deepEqual(x.last("chat"), { type: "chat", text: "good luck all", id: b.last("chat").id, name: "Bob" });
+    b.send({ type: "chat", text: "spam" });
+    assert.equal(c.all("chat").length, 1, "too soon: dropped");
+    scheduler.advance(1000);
+    b.send({ type: "chat", text: "GG" });
+    assert.equal(a.last("chat").text, "GG");
+  });
+
+  it("refuses empty or long lines and racers outside a lobby", () => {
+    const { cs } = group(2);
+    cs[0]!.send({ type: "chat", text: "   " });
+    assert.equal(cs[0]!.last("error").code, "bad_field");
+    cs[0]!.send({ type: "chat", text: "x".repeat(81) });
+    assert.equal(cs[0]!.last("error").code, "bad_field");
+    const { server } = makeServer();
+    const lone = new TestClient(server, "Lone");
+    lone.hello();
+    lone.send({ type: "chat", text: "hi" });
+    assert.equal(lone.last("error").code, "not_in_lobby");
   });
 });
