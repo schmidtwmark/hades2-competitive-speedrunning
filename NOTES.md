@@ -255,6 +255,16 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   shown while the combat UI hid. `Profile.build` now sets `Revision` to the higher of
   `Profile.REVISION` and save file 1's. Reproduced and verified with bot.json `swap_boon_test`
   (special boon swapped on the boon screen, pommed, next room: screenshots in combat / UI hidden).
+- **Title screen, then competitive** (0.5.8): two things a save load does that the competitive
+  entry has to do itself. (1) The title music (`/Music/IrisMainTheme`, started natively; its id is
+  `MainMenuScreen::mMusicId`, found through the store in the menu's constructor,
+  `competitive.lua` MENU_MUSIC_STORE_SIG) is stopped with `StopSound`. (2) The scripts' clock:
+  `wait()` schedules against `_worldTime`, which the engine sets each frame and a save load restores;
+  a new session's engine clock starts at 0, so after a quit the Crossroads arrival scheduled its waits
+  against the last session's time and held its input blocks (DeathAreaTransition,
+  StartRoomPresentation) that long. `Game:restart_script_clock` rebases waiting threads and sets it to
+  0 on entry. Leftover script input blocks (tracked through AddInputBlock/RemoveInputBlock hooks) are
+  released too. Gate: `scripts/e2e-reenter.sh` moves the hero with the stick on both visits.
 - **Presence** (0.5.6): the server sends `presence` {online, searching, racing} on hello and when the
   counts change (at most once a second); the board's home and Find Match pages show it. Older
   clients log it as unhandled; older servers never send it.

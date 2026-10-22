@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.5.7'
+local VERSION = '0.5.8'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -221,6 +221,7 @@ if bot.active and bot.cfg.probe_doors then game.probe_doors = true end
 -- Title screen entry "Play Competitive Speedrun" (native hook; see competitive.lua).
 -- Never let it take the rest of the mod down.
 local competitive = Competitive.new({ rom = rom, log = log, on_start = function() game:enter_competitive() end })
+game.stop_menu_music = function() competitive:stop_menu_music(1.0) end
 local menu_ok, menu_err = pcall(competitive.install, competitive)
 if not menu_ok then log('competitive: install failed: ' .. tostring(menu_err)) end
 -- The in-memory competitive profile must never be saved, including by native

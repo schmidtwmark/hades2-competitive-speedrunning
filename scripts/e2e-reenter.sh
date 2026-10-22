@@ -2,8 +2,9 @@
 # Competitive mode twice in one session: enter from the title screen, quit to
 # the title screen through the pause menu (virtual gamepad), enter again. The
 # Crossroads must be visible both times (a quit leaves the screen faded to
-# black), and an Arcana card the bot changed on the first visit must still be
-# changed on the second (the remembered loadout). Screenshots: local/runs/<stamp>-reenter/. Prints RESULT: PASS|FAIL.
+# black), the controls must work both times (the stick moves the hero), and an
+# Arcana card the bot changed on the first visit must still be changed on the
+# second (the remembered loadout). Screenshots: local/runs/<stamp>-reenter/. Prints RESULT: PASS|FAIL.
 # The bot also shows a countdown "3" in the Crossroads, cycling font sizes
 # (PREVIEW_SIZES: sizes or Font:size, default "128"), for font screenshots:
 # first-visit-<n>.png. RES="/X=3840 /Y=2160" for a 4K window.
@@ -41,7 +42,7 @@ SIZES="${PREVIEW_SIZES:-128}"
 cat >"$RUN/bot.json" <<JSON
 {"role":"idle","name":"PadPlayer","server_host":"127.0.0.1","server_port":9,
  "press_competitive_after":3,"press_competitive_again":true,"expect_competitive":true,"reset_to_hub":false,
- "show_ui":false,"timeout":600,"change_arcana":true,"preview_count":"3","preview_sizes":[$(printf '"%s",' $SIZES | sed 's/,$//')]}
+ "show_ui":false,"timeout":600,"change_arcana":true,"log_controls":true,"preview_count":"3","preview_sizes":[$(printf '"%s",' $SIZES | sed 's/,$//')]}
 JSON
 ssh "$HOST" "mkdir -p '$DATA' '$TB/run' && rm -f '$DATA/bot-result.txt' '$DATA/ranked.log' && cat > '$DATA/bot.json' && { [ ! -f '$DATA/loadout.json' ] || cp '$DATA/loadout.json' '$DATA/loadout.json.reenter'; }" <"$RUN/bot.json" || fail "bot.json"
 ssh "$HOST" "systemctl --user stop h2r-pad 2>/dev/null; rm -f $FIFO; systemd-run --user --unit=h2r-pad --collect --quiet \
@@ -68,18 +69,44 @@ done
 FIRST=$(brightness "first-visit-$pick")
 echo "first visit: brightness $FIRST"
 
-# Pause, Quit (the last item; extra presses stay on it), OK on "Quit without saving?".
-pad up wait:1 start wait:2 down down down down down wait:1 a wait:2 a
+# Does the left stick move the hero? Its position from the bot's last
+# log_controls line before and after holding the stick right.
+hero_at() { ssh "$HOST" "grep 'bot: controls' '$DATA/ranked.log' | tail -1" | tr -d '\r' | sed 's/.*hero=//'; }
+moves() {
+  local before after
+  before=$(hero_at)
+  pad stick:1,0,1.5 >/dev/null
+  sleep 4
+  after=$(hero_at)
+  echo "  hero $before -> $after ($(ssh "$HOST" "grep 'bot: controls' '$DATA/ranked.log' | tail -1" | tr -d '\r' | grep -o 'input_allowed=[a-z]*'))"
+  [ "$before" != "$after" ]
+}
+pad up >/dev/null; sleep 1
+FIRST_MOVES=0; moves && FIRST_MOVES=1
+
+# Pause, Quit (three down: the menu wraps around), OK on "Quit without saving?".
+pad up wait:1 start
+sleep 4
+pad down wait:0.7 down wait:0.7 down
+sleep 1
+shot quit-1-menu
+pad a
+sleep 3
+shot quit-2-confirm
+pad a
 wait_count 'competitive profile built' 2 120
 sleep 8
 shot second-visit
 SECOND=$(brightness second-visit)
 echo "second visit: brightness $SECOND"
+SECOND_MOVES=0; moves && SECOND_MOVES=1
 scp -q "$HOST:$DATA/ranked.log" "$RUN/ranked.log" 2>/dev/null
 grep -E "competitive:|fading|entering" "$RUN/ranked.log" | sed 's/^[0-9.]* //'
 ARCANA=$(grep -o 'saved_arcana=[0-9]*' "$RUN/ranked.log" | cut -d= -f2 | tr '\n' ' ')
 echo "equipped Arcana at each build: $ARCANA"
 set -- $ARCANA
 [ $# -ge 2 ] && [ $(( $1 - $2 )) -eq 1 -o $(( $2 - $1 )) -eq 1 ] || fail "the Arcana change didn't carry over ($ARCANA)"
+[ "$FIRST_MOVES" = 1 ] || fail "the stick didn't move the hero on the first visit"
+[ "$SECOND_MOVES" = 1 ] || fail "the stick didn't move the hero after re-entering"
 [ "$FIRST" -gt 10 ] || fail "first visit is dark ($FIRST)"
 [ "$SECOND" -gt 10 ] && echo "RESULT: PASS (the Crossroads shows after quitting and re-entering)" || fail "second visit is black ($SECOND)"

@@ -32,6 +32,11 @@ local SAVE_CHECKPOINT_SIG = '48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 
 local PAUSE_GIVE_UP_SIG = '48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC C0 00 00 00 0F 29 70 C8 4C'
 local PAUSE_QUIT_SIG = '48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC 90 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 27 4C 8B E9 E8 ?? ??'
 local PAUSE_RESUME_SIG = '48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 40 48 8B F9 C6 44 24 20 00 C6 44 24 37 17 48 8D 2D B8 E3 35 00'
+-- The title music's sound id, sgg::MainMenuScreen::mMusicId (static): the
+-- menu's constructor stores it right after starting the music
+-- (mov r9d,-1; lea rdx,[rbp-49]; lea rcx,[rbp-29]; call; mov [rip+disp],eax).
+-- Loading a save stops that music; the competitive entry has to stop it.
+local MENU_MUSIC_STORE_SIG = '41 B9 FF FF FF FF 48 8D 55 B7 48 8D 4D D7 E8 ?? ?? ?? ?? 89 05 ?? ?? ?? ??'
 local TEXT_ID = 'MainMenuScreen_CompetitiveSpeedrun'
 local LABEL = 'Play Competitive Speedrun'
 local FORFEIT_LABEL = 'Race Menu'
@@ -238,6 +243,32 @@ function Competitive:install_pause_hooks(h)
 		end
 	end
 	return hooked == 2
+end
+
+-- Stops the title music (fades it out). Returns true if it was found.
+function Competitive:stop_menu_music(fade)
+	local _ = _ENV
+	local mem = self.rom.memory
+	if not (mem and mem.scan_pattern) then return false end
+	if self.menu_music_id_ptr == nil then
+		local ptr = mem.scan_pattern(MENU_MUSIC_STORE_SIG)
+		if not ptr or ptr:is_null() then
+			self.menu_music_id_ptr = false
+			self.log('competitive: title music id not found (different game build); the music may keep playing')
+		else
+			-- mov [rip+disp32], eax at +19: the target is the next instruction (+25) plus disp32.
+			local disp = ptr:add(21):get_dword()
+			if disp >= 2 ^ 31 then disp = disp - 2 ^ 32 end
+			self.menu_music_id_ptr = ptr:add(25 + disp)
+		end
+	end
+	if not self.menu_music_id_ptr then return false end
+	local id = self.menu_music_id_ptr:get_dword()
+	if not id or id == 0 then return false end
+	local stop = self.rom.game.StopSound
+	if stop then stop({ Id = id, Duration = fade or 1.0 }) end
+	self.log('competitive: title music stopped (sound ' .. tostring(id) .. ')')
+	return true
 end
 
 function Competitive:install()

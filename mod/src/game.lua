@@ -33,7 +33,7 @@ local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', '
 	'UnlockAchievement', 'CheckProgressAchievements', 'CheckAchievement', 'ChooseLoot', 'FillInShopOptions',
 	'SetTraitsOnLoot', 'HandleBreakableSwap', 'CheckMoneyDrop', 'ProcessObjectValueOptions',
 	'CheckChallengeSwitchItemValidity', 'CheckPlayerOnFirePowers', 'ChooseSpell', 'CreateSpellButtons',
-	'IsSecretDoorEligible', 'ChooseNextRewardStore', 'UseWeaponKit', 'UseKeepsakeRack' }
+	'IsSecretDoorEligible', 'ChooseNextRewardStore', 'UseWeaponKit', 'UseKeepsakeRack', 'AddInputBlock', 'RemoveInputBlock' }
 
 -- Shadow animations for hero actions whose fire graphic isn't the visible move.
 local ACTION_ANIMS = { WeaponBlink = 'MelinoeDashStart', WeaponSprint = 'MelinoeSprint' }
@@ -61,6 +61,7 @@ function Game.new(deps)
 	g.profile = deps.profile
 	g.Splits = deps.splits
 	g.pbs = {}            -- route -> personal best (splits.lua), from main.lua's pb.json
+	g.input_blocks = {}   -- name -> count of the scripts' input blocks still held
 	g.client = nil
 	g.race = nil          -- race whose run is (or was) live: { race, run, rooms = {} }
 	g.launching = nil     -- race being launched (between GO and StartNewRun)
@@ -1101,10 +1102,66 @@ function Game:enter_competitive()
 	-- Quitting to the title screen leaves the screen faded to black; a save's
 	-- own load fades it back in, this one doesn't (fade_in_hub, in update).
 	self.fade_in_pending = true
+	self:release_input_blocks()
+	self:restart_script_clock()
+	if self.stop_menu_music then pcall(self.stop_menu_music) end
 	self.log('game: entering competitive mode; loading Hub_PreRun without a profile')
 	-- LoadMap is a Lua wrapper that wait()s; on the title screen there is no
 	-- game coroutine (and no threads to kill), so call the engine directly.
 	self:call('LoadMapInternal', { Name = 'Hub_PreRun' })
+end
+
+-- The scripts' input blocks (AddInputBlock/RemoveInputBlock { Name }), so the
+-- ones a quit to the title screen leaves behind can be released (below).
+function Game:hook_AddInputBlock(base, args, ...)
+	local name = type(args) == 'table' and args.Name
+	if name then self.input_blocks[name] = (self.input_blocks[name] or 0) + 1 end
+	return base(args, ...)
+end
+
+function Game:hook_RemoveInputBlock(base, args, ...)
+	local name = type(args) == 'table' and args.Name
+	if name and self.input_blocks[name] then
+		self.input_blocks[name] = self.input_blocks[name] > 1 and self.input_blocks[name] - 1 or nil
+	end
+	return base(args, ...)
+end
+
+-- The scripts' clock (_worldTime, which wait() schedules against) is set by
+-- the engine each frame, and a new session's engine clock starts at 0. A save
+-- load restores it from the save; this entry doesn't, so after a quit to the
+-- title screen it still held the last session's time while the Crossroads
+-- arrival scheduled its waits, and those waited that long: no controls for as
+-- long as you had played. Start it at 0, keeping what threads have left.
+function Game:restart_script_clock()
+	local G = self.G
+	local now, now_u = tonumber(G._worldTime) or 0, tonumber(G._worldTimeUnmodified) or 0
+	if now == 0 and now_u == 0 then return end
+	for _, list in ipairs({ G._threads or {}, G._workingThreads or {} }) do
+		for _, t in pairs(list) do
+			if type(t) == 'table' and type(t.resumeTime) == 'number' then
+				t.resumeTime = math.max(0, t.resumeTime - (t.unmodifiedTime and now_u or now))
+			end
+		end
+	end
+	G._worldTime, G._worldTimeUnmodified = 0, 0
+	self.log(string.format('game: script clock restarted (was %.1f s)', now))
+end
+
+-- Quitting to the title screen drops the scene with its input blocks still
+-- held (the pause menu's, a presentation's); loading a save clears them in
+-- the engine, the competitive entry doesn't. Release whatever is left.
+function Game:release_input_blocks()
+	local names = {}
+	for name, n in pairs(self.input_blocks) do
+		for _ = 1, n do self:call('RemoveInputBlock', { Name = name }) end
+		names[#names + 1] = name
+	end
+	self.input_blocks = {}
+	if #names > 0 then
+		table.sort(names)
+		self.log('game: released input blocks left from before: ' .. table.concat(names, ', '))
+	end
 end
 
 function Game:competitive_active()
@@ -1942,10 +1999,16 @@ function Game:bot_collect_rewards(a)
 			a.used[id] = now
 			self.log('game: bot using ' .. tostring(obj.Name) .. ' via ' .. obj.OnUsedFunctionName)
 			local hero = G.CurrentRun.Hero
+			-- What the game's OnUsed handler does after the use function: wake whatever
+			-- waits on this object. SpawnRoomReward sets NotifyName on the object the
+			-- room attached ("OnUsed<id>": the opening fight waits for it), which for a
+			-- hex drop is not the LootObjects entry.
+			local live = G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id]
+			local notify = obj.NotifyName or (type(live) == 'table' and live.NotifyName)
 			self:spawn(function()
 				if obj.OnUseEvents and G.RunEventsGeneric then G.RunEventsGeneric(obj.OnUseEvents, obj) end
 				G.CallFunctionName(obj.OnUsedFunctionName, obj, obj.OnUsedFunctionArgs, hero)
-				if obj.NotifyName and G.notifyExistingWaiters then G.notifyExistingWaiters(obj.NotifyName) end
+				if notify and G.notifyExistingWaiters then G.notifyExistingWaiters(notify) end
 			end)
 		end
 	end

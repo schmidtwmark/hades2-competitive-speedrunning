@@ -28,6 +28,7 @@
 --                 (race loadout in hand, Arcana screen, aspect swap, locked racks)
 --   probe_overlay in the competitive Crossroads, open Hell2Modding's overlay and wait for
 --                 a controller press to close it (scripts/e2e-overlay-pad.sh)
+--   log_controls  every 2 s in the competitive Crossroads, log input allowed and the hero's position
 --   change_arcana once in the competitive Crossroads, take one Arcana card off (or put one on)
 --   swap_boon_test in the first room, replace a special boon like a boon choice (HUD icon checks)
 --   preview_split once the race run is live, record a region split by hand (screenshots)
@@ -205,6 +206,24 @@ function Bot:update()
 	end
 	local c, st = self.client, self.client.state
 	if self.cfg.probe_overlay then return self:probe_overlay(now) end
+	-- log_controls: every 2 s in the competitive Crossroads, whether the game
+	-- takes input and where the hero stands (re-entry control checks).
+	if self.cfg.log_controls and self.game:competitive_active() and self.game:in_hub()
+		and now - (self.controls_logged or 0) >= 2 then
+		self.controls_logged = now
+		local G = self.game.G
+		local hero = G.CurrentRun and G.CurrentRun.Hero
+		local ok_in, allowed = pcall(G.IsInputAllowed, {})
+		local ok_at, at = pcall(G.GetLocation, { Id = hero and hero.ObjectId })
+		local blocks = {}
+		for name, n in pairs(self.game.input_blocks or {}) do blocks[#blocks + 1] = name .. 'x' .. n end
+		table.sort(blocks)
+		self.log(string.format('bot: time world=%s mult=%s threads=%s paused_map=%s', tostring(G._worldTime),
+			tostring(G._elapsedTimeMultiplier), tostring(G._threads and #G._threads), tostring(G.SessionMapState and G.SessionMapState.IsPaused)))
+		self.log(string.format('bot: controls input_allowed=%s blocks=%s hero=%s,%s', tostring(ok_in and allowed),
+			table.concat(blocks, ','), ok_at and at and string.format('%.0f', at.X or 0) or '?',
+			ok_at and at and string.format('%.0f', at.Y or 0) or '?'))
+	end
 	-- change_arcana: once in the competitive Crossroads, take one card off (or
 	-- put one on if none are), like a racer at the altar (persistence checks).
 	if self.cfg.change_arcana and not self.arcana_changed and self.game:competitive_active() and self.game:in_hub() then
