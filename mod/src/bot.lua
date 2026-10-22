@@ -585,46 +585,67 @@ function Bot:step_wait_run(now, c, st)
 	end
 end
 
--- swap_boon_test: in the first room, take a special boon, replace it with
--- another god's the way a boon choice does (HandleUpgradeChoiceSelection's
--- TraitToReplace path), then hide and show the combat UI like a dialogue.
--- Logs each step for screenshots. Returns true while it runs.
+-- swap_boon_test: in the first room, take a special boon, then replace it
+-- with another god's on the real boon screen (an exchange offer, as the game
+-- builds one) and pom it twice; in the next room, log a combat screenshot,
+-- hide the combat UI like a dialogue and log another. Returns true while it
+-- runs (the room waits).
 function Bot:swap_boon_test(now)
 	local p = self.swap_test
 	if p and p.done then return false end
-	local G = self.game.G
+	local G, game = self.game.G, self.game
 	local hero = G.CurrentRun and G.CurrentRun.Hero
 	if not hero then return true end
 	if not p then
 		p = { stage = 1, at = now + 2 }
 		self.swap_test = p
 	end
+	if p.stage == 'next_room' then
+		if self.rooms_done < 1 then return false end -- let the bot leave room 1
+		p.stage, p.at = 6, now + 4
+	end
 	if now < p.at then return true end
+	local function next_stage(stage, secs) p.stage, p.at = stage, now + secs end
 	if p.stage == 1 then
 		G.thread(function() G.AddTraitToHero({ TraitName = 'ApolloSpecialBoon', FromLoot = true }) end)
 		self.log('bot: swap test: took ApolloSpecialBoon')
-		p.stage, p.at = 2, now + 3
+		next_stage(2, 3)
 	elseif p.stage == 2 then
 		G.thread(function()
-			G.RemoveWeaponTrait('ApolloSpecialBoon')
-			local data = G.GetProcessedTraitData({ Unit = hero, TraitName = 'HeraSpecialBoon', Rarity = 'Common' })
-			G.AddTraitToHero({ TraitData = data, FromLoot = true })
+			local loot = G.CreateLoot({ Name = 'HeraUpgrade', SpawnPoint = hero.ObjectId })
+			loot.UpgradeOptions = { { ItemName = 'HeraSpecialBoon', Type = 'Trait', Rarity = 'Rare', OldRarity = 'Common',
+				TraitToReplace = 'ApolloSpecialBoon' } }
+			G.UseLoot(loot, {}, hero)
 		end)
-		self.log('bot: swap test: replaced it with HeraSpecialBoon')
-		p.stage, p.at = 3, now + 5
+		self.log('bot: swap test: opened a Hera boon offering HeraSpecialBoon over ApolloSpecialBoon')
+		next_stage(3, 4)
 	elseif p.stage == 3 then
-		local anchors = {}
-		for _, t in ipairs(hero.Traits or {}) do
-			if t.Slot == 'Secondary' then anchors[#anchors + 1] = t.Name .. '=' .. tostring(t.AnchorId) end
-		end
-		self.log('bot: swap test: combat shot now; special slot ' .. table.concat(anchors, ' '))
-		p.stage, p.at = 4, now + 4
+		game:bot_choose_upgrade()
+		next_stage(4, 5)
 	elseif p.stage == 4 then
-		G.HideCombatUI('RankedRaceSwapTest')
-		self.log('bot: swap test: combat UI hidden')
-		p.stage, p.at = 5, now + 4
+		for _, t in ipairs(hero.Traits or {}) do
+			if t.Name == 'HeraSpecialBoon' then G.thread(G.IncreaseTraitLevel, t, 2) break end
+		end
+		self.log('bot: swap test: pommed HeraSpecialBoon twice')
+		next_stage(5, 3)
 	elseif p.stage == 5 then
+		self.log('bot: swap test: room 1 shot now')
+		p.stage = 'next_room'
+		return false
+	elseif p.stage == 6 then
+		local slot = {}
+		for _, t in ipairs(hero.Traits or {}) do
+			if t.Slot == 'Secondary' then slot[#slot + 1] = t.Name .. '=' .. tostring(t.AnchorId) end
+		end
+		self.log('bot: swap test: combat shot now; special slot ' .. table.concat(slot, ' '))
+		next_stage(7, 4)
+	elseif p.stage == 7 then
+		G.HideCombatUI('RankedRaceSwapTest')
+		next_stage(8, 3)
+	elseif p.stage == 8 then
 		self.log('bot: swap test: hidden shot now')
+		next_stage(9, 3)
+	else
 		G.ShowCombatUI('RankedRaceSwapTest')
 		p.done = true
 	end

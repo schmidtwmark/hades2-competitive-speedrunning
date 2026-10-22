@@ -1253,6 +1253,7 @@ function Game:verify_competitive_profile()
 	local grasp = G.GetMaxMetaUpgradeCost and G.GetMaxMetaUpgradeCost()
 	check('max grasp', grasp == 30, 'grasp=' .. tostring(grasp))
 	check('arcana layouts ready', type(GS.MetaUpgradeLayoutsArt) == 'table' and type(GS.SavedMetaUpgradeLayouts) == 'table')
+	check('game revision set', (tonumber(G.Revision) or 0) >= self.profile.REVISION, 'Revision=' .. tostring(G.Revision))
 	check('no fear', next(GS.ShrineUpgrades or {}) == nil)
 	return checks
 end

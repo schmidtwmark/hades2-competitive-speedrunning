@@ -149,8 +149,10 @@ end
 SaveFile.LOADOUT_KEYS = { MetaUpgradeState = true, SavedMetaUpgradeLayouts = true, MetaUpgradeLayoutsArt = true,
 	CurrentMetaUpgradeLayout = true, EquippedFamiliar = true, LastWeaponUpgradeName = true }
 
--- Only the top table, its GameState, and the loadout keys under it.
+-- Only the top table, the save's game revision, its GameState and the
+-- loadout keys under it.
 local function want_loadout(path)
+	if path[1] == 'Revision' then return true end
 	if path[1] ~= 'GameState' then return false end
 	return path[2] == nil or SaveFile.LOADOUT_KEYS[path[2]] == true
 end
@@ -171,6 +173,7 @@ function SaveFile.loadout(contents, layouts_out)
 	for weapon, aspect in pairs(GS.LastWeaponUpgradeName or {}) do out.aspects[weapon] = aspect end
 	out.layouts, out.layout_art = layouts_out(GS.SavedMetaUpgradeLayouts, GS.MetaUpgradeLayoutsArt)
 	out.layout = GS.CurrentMetaUpgradeLayout
+	out.revision = tonumber(state.Revision)
 	return out
 end
 

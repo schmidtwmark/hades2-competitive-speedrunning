@@ -10,6 +10,9 @@
 
 local Profile = {}
 
+-- The game revision saves of the tested build carry (Profile1.sav: 143476).
+Profile.REVISION = 143476
+
 -- Incantations left out: randomness (bonus weapon, next-run reroll) and resets.
 local EXCLUDED_WORLD_UPGRADES = {
 	WorldUpgradeUnusedWeaponBonus = true,
@@ -250,6 +253,14 @@ function Profile.build(G, saved)
 	-- CreateRoom has RoomData (the hub maps have none).
 	G.GameState = {}
 	G.GameStateInit()
+	-- Which game revision this profile belongs to. A loaded save sets the global;
+	-- left at 0, DoPatches (every map load) would treat every trait as coming from
+	-- an old save and remove and re-add ~30 of them in every room (among them
+	-- HeraSpecialBoon and AphroditeSprintBoon, whose HUD icons then drew under the
+	-- empty-slot art). A newer save file 1 raises it for newer builds.
+	G.Revision = math.max(tonumber(G.Revision) or 0, Profile.REVISION, tonumber(type(saved) == 'table' and saved.revision) or 0)
+	G.RevisionFirstSave = G.RevisionFirstSave or G.Revision
+	summary.revision = G.Revision
 	G.InitializeMetaUpgradeState()
 	G.CurrentRun = nil
 	G.StartNewRun(nil, { RoomName = 'F_Opening01', StartingBiome = 'F', SkipChooseEncounter = true, SkipChooseReward = true })

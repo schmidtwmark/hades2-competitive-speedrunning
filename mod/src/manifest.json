@@ -1,6 +1,6 @@
 {
   "name": "RankedRace",
-  "version_number": "0.5.6",
+  "version_number": "0.5.7",
   "website_url": "",
   "description": "Hades II races for 2-5 players: same seed, rooms and foes; native race board, rival plates and shadows, controller-first.",
   "dependencies": [

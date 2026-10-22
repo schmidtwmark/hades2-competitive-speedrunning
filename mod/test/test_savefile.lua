@@ -70,6 +70,7 @@ local STATE = {
 		Unrelated = { Deep = { -2.5, 1e10 } },
 	},
 	CurrentRun = { Hero = { Health = 30 } },
+	Revision = 143999,
 }
 
 T.case('save file: header, LZ4 (with an overlapping match) and luabins decode', function()
@@ -94,6 +95,7 @@ T.case('save file: the loadout (Arcana, layouts, familiar, aspects), skipping th
 	T.eq(#l.layouts['3'], 0)
 	T.eq(l.layout_art['2'], 5)
 	T.eq(l.layout, 1)
+	T.eq(l.revision, 143999, 'the save\'s game revision')
 	local nope, why = SaveFile.loadout('SGB1' .. u32(0) .. u32(17), Profile.layouts_out)
 	T.eq(nope, nil)
 	T.truthy(tostring(why):find('version 17'))

@@ -112,4 +112,8 @@ T.case('profile: the Arcana screen\'s layout tables exist and DoPatches runs onc
 	T.eq(type(GS.MetaUpgradeLayoutsArt), 'table')
 	T.eq(type(GS.SavedMetaUpgradeLayouts), 'table')
 	T.eq(GS.CurrentMetaUpgradeLayout, 1)
+	T.eq(G.Revision, Profile.REVISION, 'a fresh profile still belongs to this game revision')
+	G.Revision = nil
+	Profile.build(G, { revision = Profile.REVISION + 10 })
+	T.eq(G.Revision, Profile.REVISION + 10, 'a newer save raises it')
 end)
