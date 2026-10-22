@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.5.4'
+local VERSION = '0.5.5'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -28,6 +28,7 @@ local Game = import('game.lua')
 local Bot = import('bot.lua')
 local Competitive = import('competitive.lua')
 local Profile = import('profile.lua')
+local SaveFile = import('savefile.lua')
 local Shadow = import('shadow.lua')
 local Hud = import('hud.lua')
 local Board = import('board.lua')
@@ -101,13 +102,26 @@ do
 		if ok and type(saved) == 'table' then game.saved_loadout = saved end
 	end
 end
+local loadout_written
 game.save_loadout = function(loadout)
 	game.saved_loadout = loadout
+	local text = json.encode(loadout)
+	if text == loadout_written then return end
 	local f = io.open(loadout_path, 'w')
 	if f then
-		f:write(json.encode(loadout))
+		f:write(text)
 		f:close()
+		loadout_written = text
 	end
+end
+-- Save file 1, read-only: the racer's own Arcana layouts, familiar and aspects
+-- until they change them in competitive mode. (Proton's user profile too.)
+game.read_save_loadout = function()
+	local home = os.getenv('USERPROFILE')
+	if not home then return nil, 'no USERPROFILE' end
+	local loadout, err = SaveFile.read_loadout(home .. '\\Saved Games\\Hades II\\Profile1.sav', Profile.layouts_out)
+	collectgarbage() -- the decompressed save (a few MB) is garbage now
+	return loadout, err
 end
 
 -- Per-race choice logs for comparing racers' runs (scripts/compare-race-logs.py).
@@ -202,7 +216,8 @@ local pause_ok, pause_err = pcall(competitive.install_pause_hooks, competitive, 
 })
 if not pause_ok then log('competitive: pause hooks failed: ' .. tostring(pause_err)) end
 if menu_ok and bot.active and bot.cfg.press_competitive_after then
-	local ok, err = pcall(competitive.install_test_press, competitive, bot.cfg.press_competitive_after, socket.gettime)
+	local ok, err = pcall(competitive.install_test_press, competitive, bot.cfg.press_competitive_after, socket.gettime,
+		bot.cfg.press_competitive_again)
 	if not ok then log('competitive: test press install failed: ' .. tostring(err)) end
 end
 if config.autoconnect or (bot.active and bot.step ~= 'idle') then client:connect() end
@@ -211,13 +226,13 @@ if config.autoconnect or (bot.active and bot.step ~= 'idle') then client:connect
 -- always_draw callbacks run on the game's script thread every frame (unless a
 -- frame is skipped), with the Lua state locked, so touching game state is safe.
 
--- First arrival in the competitive hub: connect and open the Race Board.
+-- First arrival in the competitive hub: connect (the Race Board waits at the
+-- Pitch-Black Stone).
 local competitive_arrived = false
 local function competitive_arrival()
 	if competitive_arrived or not game:competitive_active() or not game:in_hub() then return end
 	competitive_arrived = true
-	log('competitive: in the hub; opening the race board')
-	board:open_soon(1.5)
+	log('competitive: in the hub')
 	if client.state.conn == 'disconnected' and not client.want_connected then client:connect() end
 end
 

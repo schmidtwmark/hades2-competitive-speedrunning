@@ -55,6 +55,7 @@ if [ $GAME -eq 1 ]; then
   # vote, Ready) against a mock rival.
   gate game-controller-race PASS "$ROOT/scripts/e2e-pad.sh" 2
   gate game-controller-closes-overlay PASS "$ROOT/scripts/e2e-overlay-pad.sh"
+  gate game-quit-and-reenter PASS "$ROOT/scripts/e2e-reenter.sh"
   gate game-crossroads-setup PASS env COMPETITIVE=1 PROBE_PREP=1 "$ROOT/scripts/e2e-two-games.sh" 2
   # Mutation twin: per-depth seeding off, same divergent choices -> rooms must differ.
   # A real comparison must report DIFFERENT (FAIL is what the twin expects); no

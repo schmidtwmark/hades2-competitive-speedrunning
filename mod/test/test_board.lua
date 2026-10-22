@@ -380,9 +380,11 @@ T.case('board: opens in the hub, B closes a vote page and it stays closed', func
 	local logs = {}
 	local b = Board.new({ G = G, client = c, log = function(l) logs[#logs + 1] = l end, now = function() return f.t end })
 	b:install()
-	b:open_soon(0)
 	b:update(true)
-	T.truthy(b:is_open(), 'opened on arrival')
+	T.eq(b:is_open(), false, 'nothing opens on arrival')
+	b:open() -- the Pitch-Black Stone
+	b:update(true)
+	T.truthy(b:is_open(), 'the stone opens it')
 	T.eq(b.desc.id, 'home')
 	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'voting_weapon', you = 'p1', players = players })
 	f.push({ type = 'vote_phase', phase = 'weapon', timer = 15, options = { { id = 'WeaponAxe', name = 'Axe' } } })
@@ -560,7 +562,7 @@ T.case('board: first open shows the welcome (spoilers first, AI disclosure); Abo
 	T.truthy(all:find('AI'), 'AI disclosure')
 	T.truthy(all:find('open source'), 'open source')
 	T.truthy(all:find('github.com/schmidtwmark/hades2-ranked-race', 1, true), 'repo link')
-	T.truthy(Board.wants_attention(b.desc.id))
+	T.eq(Board.wants_attention(b.desc.id), false, 'the welcome waits for the stone')
 	b:press('continue')
 	T.eq(seen, 1)
 	b.desc = view(c, b)

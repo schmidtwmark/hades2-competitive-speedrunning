@@ -8,6 +8,11 @@ local Banner = {}
 Banner.__index = Banner
 
 local LAYER = 'Combat_Menu_TraitTray_Overlay'
+-- The countdown's font: fonts are bitmaps, and P22UndergroundSCHeavy (35 in
+-- Fonts.sjson) drawn at 150 was blocky. SpectralSCLightTitling's glyphs stay
+-- sharp at twice its nominal 64, also on a 4K screen (scripts/e2e-reenter.sh
+-- screenshots).
+local COUNT_FONT, COUNT_SIZE = 'SpectralSCLightTitling', 128
 local GO_SHOWN_FOR = 1.0
 local BELL = '/SFX/ThanatosAttackBell'
 
@@ -42,10 +47,10 @@ function Banner:count_id()
 	if not ms then return nil end
 	if not ms.RankedRaceCount then
 		local id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = LAYER, X = G.ScreenCenterX or 960,
-			Y = (G.ScreenCenterY or 540) - 160 })
-		G.CreateTextBox({ Id = id, Text = ' ', Font = 'P22UndergroundSCHeavy', FontSize = 150, Justification = 'Center',
+			Y = (G.ScreenCenterY or 540) - 250 })
+		G.CreateTextBox({ Id = id, Text = ' ', Font = self.count_font or COUNT_FONT, FontSize = self.count_size or COUNT_SIZE, Justification = 'Center',
 			Color = { 254, 255, 255, 255 }, ShadowColor = { 0, 0, 0, 240 }, ShadowOffset = { 0, 4 }, ShadowBlur = 0,
-			OutlineThickness = 3, OutlineColor = { 0, 0, 0, 255 } })
+			OutlineThickness = 2, OutlineColor = { 0, 0, 0, 255 } })
 		ms.RankedRaceCount = id
 	end
 	return ms.RankedRaceCount
@@ -57,14 +62,15 @@ function Banner:tick()
 	local now = self.now()
 	if race ~= self.race then self.race, self.go_at = race, nil end -- new race (or rematch)
 	if race and race.started and not self.go_at then self.go_at = race.resumed and -math.huge or now end
-	local text = Banner.count_text(race, c:countdown_remaining(), self.go_at and (now - self.go_at))
+	-- preview: test bots show a count by hand (screenshots of the font).
+	local text = self.preview or Banner.count_text(race, c:countdown_remaining(), self.go_at and (now - self.go_at))
 	if text ~= self.shown then
 		self.shown = text
 		local ms = G.MapState
 		if text then
 			local id = self:count_id()
 			G.ModifyTextBox({ Id = id, Text = text, Color = text == 'GO' and { 255, 202, 110, 255 } or { 254, 255, 255, 255 } })
-			pcall(G.PulseText, { Id = id, ScaleTarget = 1.25, ScaleDuration = 0.15, HoldDuration = 0, PulseBias = 0.02 })
+			pcall(G.PulseText, { Id = id, ScaleTarget = 1.1, ScaleDuration = 0.15, HoldDuration = 0, PulseBias = 0.02 })
 			pcall(G.PlaySound, { Name = BELL })
 			self.stats.counts = self.stats.counts + 1
 		elseif ms and ms.RankedRaceCount then

@@ -382,8 +382,85 @@ function Hud:update_clock()
 	end
 end
 
+-- Prep time (after the votes, in the Crossroads): time left and who is
+-- ready, top right and above menus, so it stays in view on the Arcana and
+-- aspect screens while racers set up. The Arcana screen keeps its Grasp meter
+-- and layout decks in the top right corner: there the panel sits left of them.
+local PREP_ROW_H = 30
+local PREP_Y = 44
+local PREP_ARCANA_RIGHT = 400 -- from the right edge, clear of the Grasp meter
+
+-- The panel's title and one row per racer, or nil outside the prep time.
+function Hud.prep_view(st, now)
+	local lobby = st.lobby
+	if not (lobby and lobby.phase == 'ready_check') then return nil end
+	local title = 'Race starts when everyone is ready'
+	if type(lobby.prep_ends_in) == 'number' then
+		local left = math.max(0, math.ceil(lobby.prep_ends_in - (now - (lobby.received or now))))
+		title = string.format('Race starts in %d:%02d', math.floor(left / 60), left % 60)
+	end
+	local rows = {}
+	for _, p in ipairs(lobby.players or {}) do
+		local state, color = 'setting up', GREY
+		if p.ready then
+			state, color = 'ready', GREEN
+		elseif p.connected == false then
+			state, color = 'away', RED
+		end
+		rows[#rows + 1] = { text = (p.id == lobby.you and 'You' or safe_name(p.name)) .. ' - ' .. state, color = color }
+	end
+	return { title = title, rows = rows }
+end
+
+function Hud:update_prep()
+	local G, ms = self.G, self.G.MapState
+	local now = self.now()
+	if now - (self.last_prep or 0) < 0.2 then return end
+	self.last_prep = now
+	local view = self.game:in_hub() and Hud.prep_view(self.client.state, now) or nil
+	local screens = G.ActiveScreens or {}
+	local right = (G.ScreenWidth or 1920) - (screens.MetaUpgradeCardLayout and PREP_ARCANA_RIGHT or MARGIN)
+	local panel = ms.RankedRacePrep
+	if panel and (not view or panel.n ~= #view.rows or panel.right ~= right) then
+		pcall(G.Destroy, { Ids = panel.ids })
+		ms.RankedRacePrep, panel = nil, nil
+	end
+	if not view then return end
+	if not panel then
+		panel = { ids = {}, rows = {}, shown = {}, n = #view.rows, right = right }
+		local function text(y, size, color)
+			local id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = CLOCK_GROUP, X = right, Y = y })
+			local a = text_args(id, 'P22UndergroundSCMedium', size, 'Right', color)
+			a.DataProperties = nil
+			G.CreateTextBox(a)
+			panel.ids[#panel.ids + 1] = id
+			return id
+		end
+		panel.title = text(PREP_Y, 28, TITLE)
+		for i = 1, panel.n do panel.rows[i] = text(PREP_Y + 12 + i * PREP_ROW_H, 20, GREY) end
+		ms.RankedRacePrep = panel
+		self.stats.prep_panels = (self.stats.prep_panels or 0) + 1
+	end
+	local function show(key, id, text, color)
+		local shown = text .. ':' .. tostring(color and color[1])
+		if panel.shown[key] ~= shown then
+			panel.shown[key] = shown
+			self:set(id, text, color)
+		end
+	end
+	show('title', panel.title, view.title)
+	for i, row in ipairs(view.rows) do show(i, panel.rows[i], row.text, row.color) end
+end
+
 function Hud:update()
 	if self.disabled or not self.G.MapState then return end
+	if not self.prep_failed then
+		local ok, err = pcall(self.update_prep, self)
+		if not ok then
+			self.prep_failed = true
+			self.log('hud: prep panel disabled: ' .. tostring(err))
+		end
+	end
 	if not self:wanted() then
 		self:destroy()
 		self:destroy_clock()

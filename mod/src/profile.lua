@@ -144,11 +144,55 @@ function Profile.mark_story_seen(G, GS)
 	return sets
 end
 
--- The racer's own picks from earlier sessions (main.lua keeps them in the
--- mod's data folder): equipped Arcana within the Grasp limit, the familiar
+-- Arcana layouts (the Arcana screen's saved card sets) in a JSON-safe form:
+-- { ["1"] = { card names, sorted } }, art { ["1"] = texture }, the current one.
+function Profile.layouts_out(saved_layouts, art)
+	local layouts, out_art = {}, {}
+	for slot, set in pairs(type(saved_layouts) == 'table' and saved_layouts or {}) do
+		if tonumber(slot) and type(set) == 'table' then
+			local names = {}
+			for name, on in pairs(set) do
+				if on then names[#names + 1] = name end
+			end
+			table.sort(names)
+			layouts[string.format('%d', tonumber(slot))] = names
+		end
+	end
+	for slot, num in pairs(type(art) == 'table' and art or {}) do
+		if tonumber(slot) and tonumber(num) then out_art[string.format('%d', tonumber(slot))] = tonumber(num) end
+	end
+	return layouts, out_art
+end
+
+local function apply_layouts(G, GS, saved)
+	if type(saved.layouts) == 'table' then
+		GS.SavedMetaUpgradeLayouts = {}
+		for slot, names in pairs(saved.layouts) do
+			if tonumber(slot) and type(names) == 'table' then
+				local set = {}
+				for _, name in ipairs(names) do
+					if G.MetaUpgradeCardData[name] then set[name] = true end
+				end
+				GS.SavedMetaUpgradeLayouts[tonumber(slot)] = set
+			end
+		end
+	end
+	if type(saved.layout_art) == 'table' then
+		GS.MetaUpgradeLayoutsArt = {}
+		for slot, num in pairs(saved.layout_art) do
+			if tonumber(slot) and tonumber(num) then GS.MetaUpgradeLayoutsArt[tonumber(slot)] = tonumber(num) end
+		end
+	end
+	if tonumber(saved.layout) then GS.CurrentMetaUpgradeLayout = tonumber(saved.layout) end
+end
+
+-- The racer's own picks: from earlier competitive sessions (main.lua keeps
+-- them in the mod's data folder), else from save file 1 (savefile.lua):
+-- equipped Arcana within the Grasp limit, the Arcana layouts, the familiar
 -- and each weapon's aspect. Returns how many Arcana were equipped.
 function Profile.apply_loadout(G, GS, saved)
 	if type(saved) ~= 'table' then return 0 end
+	apply_layouts(G, GS, saved)
 	local budget, n = G.GetMaxMetaUpgradeCost and G.GetMaxMetaUpgradeCost() or 0, 0
 	for _, name in ipairs(type(saved.arcana) == 'table' and saved.arcana or {}) do
 		local data, state = G.MetaUpgradeCardData[name], GS.MetaUpgradeState[name]
@@ -175,6 +219,25 @@ function Profile.capture_loadout(GS)
 	end
 	table.sort(out.arcana)
 	for weapon, aspect in pairs(GS.LastWeaponUpgradeName or {}) do out.aspects[weapon] = aspect end
+	out.layouts, out.layout_art = Profile.layouts_out(GS.SavedMetaUpgradeLayouts, GS.MetaUpgradeLayoutsArt)
+	out.layout = GS.CurrentMetaUpgradeLayout
+	return out
+end
+
+-- The remembered competitive loadout over save file 1's: what the racer set
+-- in competitive mode wins and the save fills in the rest. The Arcana (cards,
+-- layouts, current layout) move as one: the game rewrites the current layout
+-- from the equipped cards, so they must agree. Loadouts remembered before
+-- layouts were (0.5.4 and older) take the save's Arcana.
+local ARCANA_KEYS = { arcana = true, layouts = true, layout_art = true, layout = true }
+function Profile.merge_loadouts(mine, from_save)
+	if type(from_save) ~= 'table' then return mine end
+	if type(mine) ~= 'table' then return from_save end
+	local out = {}
+	for k, v in pairs(from_save) do out[k] = v end
+	for k, v in pairs(mine) do
+		if not ARCANA_KEYS[k] or mine.layouts ~= nil then out[k] = v end
+	end
 	return out
 end
 
@@ -282,6 +345,12 @@ function Profile.build(G, saved)
 
 	-- Seen everything: story, dialogue, voice lines, tutorials, first pickups.
 	summary.story_lines = Profile.mark_story_seen(G, GS)
+	-- Weapon and cast tutorials (the controls list that otherwise shows after
+	-- each weapon pickup or aspect change). Not the in-run challenge objectives.
+	GS.CompletedObjectiveSets = GS.CompletedObjectiveSets or {}
+	for name in pairs(G.ObjectiveSetData or {}) do
+		if type(name) == 'string' and name:find('Tutorial') then GS.CompletedObjectiveSets[name] = true end
+	end
 	for _, encounter in ipairs(sorted_keys(G.EncounterData)) do
 		GS.EncountersCompletedCache[encounter] = 1
 		GS.EncountersOccurredCache[encounter] = 1

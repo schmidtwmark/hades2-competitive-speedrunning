@@ -1053,6 +1053,9 @@ function Game:enter_competitive()
 	G.RankedRaceCompetitive = { requested = true }
 	G.GameState = nil
 	G.CurrentRun = nil
+	-- Quitting to the title screen leaves the screen faded to black; a save's
+	-- own load fades it back in, this one doesn't (fade_in_hub, in update).
+	self.fade_in_pending = true
 	self.log('game: entering competitive mode; loading Hub_PreRun without a profile')
 	-- LoadMap is a Lua wrapper that wait()s; on the title screen there is no
 	-- game coroutine (and no threads to kill), so call the engine directly.
@@ -1072,7 +1075,19 @@ function Game:hook_StartNewGame(base, mapName)
 	c.requested = false
 	-- Active while building too: unlocking everything must not save or earn achievements.
 	c.active = true
-	local ok, summary = pcall(self.profile.build, self.G, self.saved_loadout)
+	local loadout = self.saved_loadout
+	if self.read_save_loadout then
+		local rok, from_save, err = pcall(self.read_save_loadout)
+		if rok and from_save then
+			local slots = 0
+			for _ in pairs(from_save.layouts or {}) do slots = slots + 1 end
+			self.log(string.format('game: save file 1: %d Arcana equipped, %d layouts', #(from_save.arcana or {}), slots))
+			loadout = self.profile.merge_loadouts(loadout, from_save)
+		else
+			self.log('game: save file 1 not used: ' .. tostring(rok and err or from_save))
+		end
+	end
+	local ok, summary = pcall(self.profile.build, self.G, loadout)
 	if not ok then
 		c.active = false
 		self.log('game: competitive profile build FAILED: ' .. tostring(summary))
@@ -1610,8 +1625,29 @@ function Game:diagnose(now)
 	end
 end
 
+-- Once the competitive Crossroads is up after the title-screen entry.
+function Game:fade_in_hub()
+	if not (self.fade_in_pending and self:competitive_active() and self:in_hub()) then return end
+	self.fade_in_pending = false
+	self:call('FadeIn', { Duration = 0.5 })
+	self.log('game: fading the Crossroads in')
+end
+
+-- Competitive Crossroads: remember the racer's Arcana, layouts, familiar and
+-- aspects as they change them (not only at a race start), so quitting to the
+-- title screen keeps them. save_loadout writes only when something changed.
+function Game:remember_loadout()
+	if not (self.save_loadout and self:competitive_active() and self:in_hub() and self.G.GameState) then return end
+	local now = self.now()
+	if now - (self.last_remember or 0) < 2 then return end
+	self.last_remember = now
+	self.save_loadout(self.profile.capture_loadout(self.G.GameState))
+end
+
 function Game:update()
 	pcall(self.diagnose, self, self.now())
+	pcall(self.fade_in_hub, self)
+	pcall(self.remember_loadout, self)
 	self:in_hub_now()
 	pcall(self.update_door_prompts, self)
 	local ok, err = pcall(self.equip_voted_loadout, self)

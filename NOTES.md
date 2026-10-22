@@ -181,8 +181,10 @@ stock, purchases) to `plugins_data/.../races/`; `scripts/compare-race-logs.py` d
 Everything a player touches is native Hades UI driven by the game's own menu
 machinery, so a controller works everywhere; the ImGui window (F8) is debug only.
 
-- **Race Board** (`mod/src/board.lua`): opens by itself on arrival in the competitive hub
-  and whenever a vote, ready check or result needs the player; the Pitch-Black Stone
+- **Race Board** (`mod/src/board.lua`): opens by itself only when a vote, ready check or
+  result needs the player (since 0.5.5 not on arrival, and the welcome page waits for the
+  stone too; the test bot uses the stone with `CallFunctionName`, once input is allowed —
+  using it during the arrival walk-in leaves the board deaf to the pad); the Pitch-Black Stone
   (Hub_PreRun obstacle 561146) becomes its entrance (`OnUsedFunctionName`, UseText
   `RankedRace_UseBoard` = "{I} Race", added to ScreenText.*.sjson). Built like the
   StoryReset prompt / Keepsake rack: `OnScreenOpened`, `CreateScreenFromData` (tint +
@@ -281,6 +283,32 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   board), with **Ready Now** beside it. Two user races started instantly because a confirm press a few
   seconds after the page opened hit the old focused Ready button. Confirm presses are also ignored for
   0.8 s after the board switches to a different page (`Board.SETTLE`; B is never held back).
+- **Prep panel** (0.5.5, `hud.lua` `prep_view`): during the prep time, top right in the
+  `Combat_Menu_TraitTray_Overlay` group (above menus): "Race starts in m:ss" from the
+  lobby's `prep_ends_in`, then one line per racer (ready / setting up / away). The Arcana
+  screen keeps its Grasp meter and layout decks in that corner, so while it is open the
+  panel sits 400 px from the right edge.
+- **Countdown font** (0.5.5): fonts are bitmaps (Fonts.sjson `FontSize` is the stored
+  size); P22UndergroundSCHeavy (35) drawn at 150 was blocky, on a 4K screen most of all.
+  SpectralSCLightTitling (64, a much larger glyph file) at 128 stays sharp at 1080p and 4K
+  (`PREVIEW_SIZES="Font:size ..." RES="/X=3840 /Y=2160" scripts/e2e-reenter.sh`).
+- **Quit to the title screen, then competitive again** (0.5.5): the quit leaves the screen
+  faded to black and a save's own load is what fades it back in, so the second entry was a
+  black screen. `Game:fade_in_hub` calls `FadeIn({Duration=0.5})` once the hub is up after
+  each entry. Gate: `scripts/e2e-reenter.sh` (virtual pad: Start, Quit, OK; brightness of
+  both visits, and an Arcana change carried across).
+- **Loadouts from save file 1** (0.5.5, `savefile.lua`): `%USERPROFILE%\Saved Games\Hades
+  II\Profile1.sav`, opened read-only. Format (save version 18): `SGB1`, checksum u32,
+  version u32, timestamp u64, location string, five u32 and two u8, a count of strings and
+  the strings, two map names, a u32 length and an LZ4 block holding the Lua state as luabins
+  (`T` tables with u32 array/hash counts, `S` u32-length strings, `N` doubles, `0`/`1`/`-`).
+  A 696 KB save is 2.7 MB of state; the Lua decoder takes ~0.12 s and builds only GameState's
+  loadout keys. Cards, `SavedMetaUpgradeLayouts`, `MetaUpgradeLayoutsArt` and
+  `CurrentMetaUpgradeLayout` move as one (the game rewrites the current layout from the
+  equipped cards); the remembered competitive loadout (`loadout.json`, now written whenever
+  it changes in the competitive hub) wins once it has layouts, the save fills in the rest.
+  The profile also marks the `*Tutorial` objective sets complete (the weapon controls list
+  that showed after each aspect change); in-run challenge objectives are left alone.
 - **Race loadout in the Crossroads** (0.5.3): once a weapon or keepsake vote lands, `UseWeaponKit`
   refuses every other weapon's kit ("Locked" notice) while the voted weapon's kit still opens its
   aspect screen, and `UseKeepsakeRack` refuses the Crossroads rack (the game's locked-rack shake).

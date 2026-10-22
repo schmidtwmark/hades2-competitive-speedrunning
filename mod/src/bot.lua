@@ -28,6 +28,9 @@
 --                 (race loadout in hand, Arcana screen, aspect swap, locked racks)
 --   probe_overlay in the competitive Crossroads, open Hell2Modding's overlay and wait for
 --                 a controller press to close it (scripts/e2e-overlay-pad.sh)
+--   change_arcana once in the competitive Crossroads, take one Arcana card off (or put one on)
+--   preview_count show this countdown text in the Crossroads (font screenshots)
+--   press_competitive_again  also press the title-screen entry after a quit to the menu
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
 
@@ -200,6 +203,48 @@ function Bot:update()
 	end
 	local c, st = self.client, self.client.state
 	if self.cfg.probe_overlay then return self:probe_overlay(now) end
+	-- change_arcana: once in the competitive Crossroads, take one card off (or
+	-- put one on if none are), like a racer at the altar (persistence checks).
+	if self.cfg.change_arcana and not self.arcana_changed and self.game:competitive_active() and self.game:in_hub() then
+		local G = self.game.G
+		local GS = G.GameState
+		local names = {}
+		for name, st in pairs(GS and GS.MetaUpgradeState or {}) do
+			local card = G.MetaUpgradeCardData and G.MetaUpgradeCardData[name]
+			if type(card) == 'table' and not card.DebugOnly and type(st) == 'table' and st.Unlocked then names[#names + 1] = name end
+		end
+		table.sort(names)
+		local pick
+		for _, name in ipairs(names) do
+			if GS.MetaUpgradeState[name].Equipped then pick = name; break end
+		end
+		if pick then
+			GS.MetaUpgradeState[pick].Equipped = nil
+		elseif names[1] then
+			pick = names[1]
+			GS.MetaUpgradeState[pick].Equipped = true
+		end
+		self.arcana_changed = true
+		self.log('bot: changed the Arcana card ' .. tostring(pick))
+	end
+	-- preview_count: show this countdown text in the Crossroads (font screenshots).
+	if self.cfg.preview_count and self.game.banner then
+		local banner, G = self.game.banner, self.game.G
+		banner.preview = self.game:in_hub() and self.cfg.preview_count or nil
+		-- preview_sizes: cycle "Font:size" (or a size) every 6 s (rebuilds the text box).
+		local sizes = self.cfg.preview_sizes
+		if type(sizes) == 'table' and #sizes > 0 and G.MapState then
+			local pick = tostring(sizes[math.floor((now - self.started) / 6) % #sizes + 1])
+			local font, size = pick:match('^(%w+):(%d+)$')
+			size = tonumber(size or pick)
+			if size ~= banner.count_size or font ~= banner.count_font then
+				if G.MapState.RankedRaceCount then pcall(G.Destroy, { Id = G.MapState.RankedRaceCount }) end
+				G.MapState.RankedRaceCount, banner.shown = nil, nil
+				self.log('bot: countdown preview ' .. pick)
+			end
+			banner.count_size, banner.count_font = size, font
+		end
+	end
 	if self.step == 'idle' then return end
 	if self.game.bot_advance_dialogue then self.game:bot_advance_dialogue() end
 	if self.game.bot_wake_death_loop and self.cfg.role ~= 'pad' then self.game:bot_wake_death_loop() end
@@ -266,7 +311,10 @@ function Bot:step_wait_game(now, c)
 	end
 	if self.game:ready_for_race() then
 		if self:wait_dwell('lobby', now) then return end
-		if self.cfg.use_board and not (self.board and self.board:is_open()) then return end
+		if (self.cfg.use_board or self.cfg.role == 'pad') and not (self.board and self.board:is_open()) then
+			self:use_stone(now)
+			return
+		end
 		if self.cfg.role == 'pad' then
 			self:go_step('pad_lobby')
 		elseif self.cfg.role == 'host' then
@@ -389,6 +437,22 @@ function Bot:step_lobby(now, c, st)
 		end
 		self:go_step('countdown')
 	end
+end
+
+-- Walk up to the Pitch-Black Stone and use it (its OnUsed function, as the
+-- interact button does): the Race Board opens.
+function Bot:use_stone(now)
+	if now - (self.stone_used or 0) < 3 then return end
+	-- Like a player: not during the arrival walk-in (input blocked) or a menu.
+	local b = self.board
+	if not b or b:other_screen_open() or not b:input_allowed() then return end
+	self.stone_used = now
+	local G = self.game.G
+	local id = self.board and self.board.STONE_ID
+	local stone = id and G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id]
+	if not (stone and stone.OnUsedFunctionName) then return end
+	self.log('bot: using the Pitch-Black Stone')
+	G.thread(G.CallFunctionName, stone.OnUsedFunctionName, stone, stone.OnUsedFunctionArgs, G.CurrentRun and G.CurrentRun.Hero)
 end
 
 -- probe_prep: before readying, use the Crossroads like a player setting up a

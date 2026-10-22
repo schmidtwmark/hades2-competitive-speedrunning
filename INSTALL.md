@@ -53,9 +53,10 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
    `--rom_enabled true` right after `%command%`.
 
 4. **Play.** Start Hades II and pick **Play Competitive Speedrun** on the title
-   screen. You arrive in the Crossroads and the Race Board opens (the first time
-   with a welcome page: competitive mode uses a 100% completed save, so expect
-   story spoilers). Everything works with a controller.
+   screen. You arrive in the Crossroads; the Race Board is at the Pitch-Black
+   Stone (the hint at the bottom of the screen points there). The first time it
+   shows a welcome page: competitive mode uses a 100% completed save, so expect
+   story spoilers. Everything works with a controller.
 
 ## Racing
 
@@ -73,12 +74,15 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
   keepsake rack stay locked until the race starts, and you can swap keepsakes
   between regions as usual (close the board with B; the hint at the bottom of the screen says where
   to reopen it: the Pitch-Black Stone). Walk to the voted route's exit and use it
-  ("Ready to Race"), or press **Ready Now** on the board. The race starts as soon as
+  ("Ready to Race"), or press **Ready Now** on the board. The top right of the
+  screen shows the time left and who is ready. The race starts as soon as
   everyone is ready, or when the 2 minutes run out, after a 3-2-1.
 - Every racer gets the same fully upgraded profile, kept in memory only: your own
   save is never loaded or written, and it can't earn achievements. It has seen
-  the whole story, so no first-meeting dialogue or tutorials play. Your Arcana,
-  familiar and aspects are remembered for next time.
+  the whole story, so no first-meeting dialogue or tutorials play. The first time,
+  your Arcana (cards and saved loadouts), familiar and aspects come from your save
+  file 1, which is only read, never changed. What you change in competitive mode is
+  remembered for next time, for competitive mode only.
 - Every room has the same layout and enemies for everyone whatever doors and
   boons you pick, and the same rewards, gods, shop and well stock are on offer
   as far as your build allows; choices only change what you take.

@@ -175,3 +175,20 @@ T.case('hud: the race clock keeps every character in a fixed cell', function()
 	local long = Hud.clock_cells('10:05.30', 1872)
 	T.eq(long[8], a[7], 'a new leading digit does not move the others')
 end)
+
+T.case('hud: prep panel counts down the prep time and shows who is ready', function()
+	local st = { lobby = { phase = 'ready_check', you = 'p1', prep_ends_in = 90, received = 100, players = {
+		{ id = 'p1', name = 'Mark', ready = false, connected = true },
+		{ id = 'p2', name = 'Blah{guy}', ready = true, connected = true },
+		{ id = 'p3', name = 'Gone', ready = false, connected = false } } } }
+	local v = Hud.prep_view(st, 125.4)
+	T.eq(v.title, 'Race starts in 1:05')
+	T.eq(v.rows[1].text, 'You - setting up')
+	T.eq(v.rows[2].text, 'Blahguy - ready', 'names stay literal')
+	T.eq(v.rows[3].text, 'Gone - away')
+	T.eq(Hud.prep_view(st, 500).title, 'Race starts in 0:00')
+	st.lobby.prep_ends_in = nil
+	T.eq(Hud.prep_view(st, 100).title, 'Race starts when everyone is ready')
+	st.lobby.phase = 'racing'
+	T.eq(Hud.prep_view(st, 100), nil, 'only during the prep time')
+end)

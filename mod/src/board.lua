@@ -566,7 +566,7 @@ function Board.wants_attention(id)
 	local joined = tonumber(id:match('^waiting:(%d+):true$'))
 	-- Your run is over while others race on: your result and their progress.
 	local out = id:match("^racing:[^:]*:(%a+):")
-	return id == 'welcome' or id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
+	return id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
 		or id:find(':mismatch$') ~= nil or (joined ~= nil and joined >= 2) or (out ~= nil and out ~= 'running')
 end
 
@@ -1200,25 +1200,15 @@ function Board:tick(in_hub)
 	elseif self.ui.prompt then
 		if not self:other_screen_open() and self:input_allowed() then self:open() end
 	elseif in_hub and not d.close then
-		-- Open by itself on arrival and when the race needs the player.
+		-- The Pitch-Black Stone opens it; it opens by itself only when the race
+		-- needs the player (votes, the Ready page, results), never on arrival.
 		-- A page counts as seen once it was rendered (render sets last_attention),
 		-- so one that can't open yet (input blocked during the walk-in) waits.
 		local attention = Board.wants_attention(d.id) and d.id ~= self.last_attention
-		local now = self.now()
-		if attention or (self.open_at and now >= self.open_at) then
-			-- Not during the hub's arrival presentation: it blocks input, and a
-			-- board that ignores the controller looks broken.
-			if not self:other_screen_open() and self:input_allowed() then
-				self.open_at = nil
-				self:open()
-			end
-		end
+		-- Not during the hub's arrival presentation: it blocks input, and a
+		-- board that ignores the controller looks broken.
+		if attention and not self:other_screen_open() and self:input_allowed() then self:open() end
 	end
-end
-
--- Open once the hero has settled in the hub (first arrival).
-function Board:open_soon(delay)
-	self.open_at = self.now() + (delay or 1.5)
 end
 
 function Board:input_allowed()

@@ -252,7 +252,8 @@ end
 -- reach the window under gamescope, so the bot presses the entry from a
 -- MainMenuScreen::Update hook by calling the button's callback target,
 -- OpenPatchNotes(this) -- which goes through the hook above like a real click.
-function Competitive:install_test_press(after_seconds, now)
+-- again: also press it each later time the title screen comes back (quit to menu).
+function Competitive:install_test_press(after_seconds, now, again)
 	local _ = _ENV
 	local mem = self.rom.memory
 	if not self.open_patch_notes_ptr then return false end
@@ -263,9 +264,12 @@ function Competitive:install_test_press(after_seconds, now)
 	end
 	local call_name = mem.dynamic_call('void', { 'uint64_t' }, self.open_patch_notes_ptr)
 	local call = self.rom.game[call_name]
-	local first, done, log = nil, false, self.log
+	local first, done, last, log = nil, false, nil, self.log
 	mem.dynamic_hook('RankedRace_MainMenuUpdate', 'void', { 'uint64_t', 'float', 'uint64_t' }, upd, {
 		function(_, this_screen)
+			-- A gap in the menu's updates: it closed and has come back.
+			if again and last and now() - last > 2 then first, done = nil, false end
+			last = now()
 			if done then return true end
 			first = first or now()
 			if now() - first >= after_seconds then
