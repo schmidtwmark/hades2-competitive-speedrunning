@@ -28,6 +28,7 @@ GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /Require
 #   screen; B is told mid-run, keeps going two more rooms, then forfeits.
 # ROUTE=surface|dream|underworld: what both bots vote for (default underworld).
 # READY_VIA_DOOR=true: bots ready up by using the route's exit, not the board's Ready.
+# RACE_SEED=n: every race uses seed n (local server only), e.g. 824876918 opens with Selene's hex.
 # PROBE_PREP=1: A checks the Crossroads set-up during the prep time (bot.lua probe_prep).
 # BOT_EXTRA='"welcome_dwell":5': extra bot.json fields for both bots.
 # MOCKS=n: n mock racers (on this Mac) also join A's private lobby, and A starts
@@ -53,7 +54,7 @@ if [ -n "${REMOTE_SERVER:-}" ]; then
   MAC_IP="${REMOTE_SERVER%:*}"; PORT="${REMOTE_SERVER##*:}"
 else
   (cd "$ROOT/server" && npm run --silent build) || fail "server build"
-  PORT=$PORT HOST=0.0.0.0 VOTE_SECONDS=${VOTE_SECONDS:-4} COUNTDOWN_MS=3000 ROUTES=${ROUTES:-underworld,surface,dream} node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
+  PORT=$PORT HOST=0.0.0.0 RACE_SEED=${RACE_SEED:-} VOTE_SECONDS=${VOTE_SECONDS:-4} COUNTDOWN_MS=3000 ROUTES=${ROUTES:-underworld,surface,dream} node "$ROOT/server/dist/src/index.js" >"$RUN/server.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
 fi

@@ -563,8 +563,22 @@ function Bot:probe_prep(now)
 		self:check('prep: keepsake rack present', rack ~= nil, tostring(id))
 		if rack then G.thread(G.UseKeepsakeRack, rack, hero) end
 		next_stage(3)
-	else
+	elseif p.stage == 9 then
 		self:check('prep: keepsake rack stays shut', screens.KeepsakeRack == nil and GS.LastAwardTrait == keepsake)
+		-- Magick below max starts the game's regen loop, which reads the last
+		-- room's encounter each tick (it crashed on the competitive profile's
+		-- encounter-less room); a regen source of our own makes the ticks count.
+		if hero.MaxMana and hero.ManaRegenSources and G.ManaRegen then
+			p.mana_from = math.max(0, hero.MaxMana - 30)
+			hero.Mana = p.mana_from
+			hero.ManaRegenSources.BotProbe = { Value = 20 }
+			G.thread(G.ManaRegen)
+		end
+		next_stage(4)
+	elseif p.stage == 10 then
+		if hero.ManaRegenSources then hero.ManaRegenSources.BotProbe = nil end
+		self:check('prep: Magick regenerates in the Crossroads', p.mana_from ~= nil and (hero.Mana or 0) > p.mana_from,
+			tostring(p.mana_from) .. ' -> ' .. tostring(hero.Mana))
 		p.done = true
 	end
 end

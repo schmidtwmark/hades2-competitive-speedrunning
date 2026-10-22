@@ -1311,6 +1311,8 @@ function Game:verify_competitive_profile()
 	check('max grasp', grasp == 30, 'grasp=' .. tostring(grasp))
 	check('arcana layouts ready', type(GS.MetaUpgradeLayoutsArt) == 'table' and type(GS.SavedMetaUpgradeLayouts) == 'table')
 	check('game revision set', (tonumber(G.Revision) or 0) >= self.profile.REVISION, 'Revision=' .. tostring(G.Revision))
+	local room = G.CurrentRun and G.CurrentRun.CurrentRoom
+	check('the last room has an encounter', room ~= nil and type(room.Encounter) == 'table', room and tostring(room.Name))
 	check('no fear', next(GS.ShrineUpgrades or {}) == nil)
 	return checks
 end
@@ -1999,18 +2001,42 @@ function Game:bot_collect_rewards(a)
 			a.used[id] = now
 			self.log('game: bot using ' .. tostring(obj.Name) .. ' via ' .. obj.OnUsedFunctionName)
 			local hero = G.CurrentRun.Hero
-			-- What the game's OnUsed handler does after the use function: wake whatever
-			-- waits on this object. SpawnRoomReward sets NotifyName on the object the
-			-- room attached ("OnUsed<id>": the opening fight waits for it), which for a
-			-- hex drop is not the LootObjects entry.
-			local live = G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id]
-			local notify = obj.NotifyName or (type(live) == 'table' and live.NotifyName)
 			self:spawn(function()
 				if obj.OnUseEvents and G.RunEventsGeneric then G.RunEventsGeneric(obj.OnUseEvents, obj) end
 				G.CallFunctionName(obj.OnUsedFunctionName, obj, obj.OnUsedFunctionArgs, hero)
-				if notify and G.notifyExistingWaiters then G.notifyExistingWaiters(notify) end
+				-- What the game's OnUsed handler does after the use function: wake
+				-- whatever waits on this object. SpawnRoomReward sets NotifyName
+				-- ("OnUsed<id>": the opening fight waits for it) on the table it
+				-- returned, the RoomRequiredObjects entry, which for a hex drop is
+				-- not the LootObjects one.
+				local live = G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id]
+				local woken = {}
+				for _, t in ipairs({ obj, live or false, required }) do
+					local name = type(t) == 'table' and t.NotifyName
+					if name and not woken[name] and G.notifyExistingWaiters then
+						woken[name] = true
+						G.notifyExistingWaiters(name)
+					end
+				end
 			end)
 		end
+	end
+end
+
+-- Press a screen button the way a player's input does: through the screen's
+-- input loop (HandleScreenInput waits on "ScreenInput<name>"), which runs the
+-- button's handler and then sees the screen closed and returns. Calling the
+-- handler directly leaves the loop waiting, and whatever opened the screen
+-- never resumes (Selene's hex: the opening fight waits on its OnUsed).
+function Game:bot_press(screen, button)
+	local G = self.G
+	local event = 'ScreenInput' .. tostring(screen.Name or '')
+	local waiting = type(G._eventListeners) == 'table' and G._eventListeners[event] ~= nil
+	if waiting and type(G.NotifyResultsTable) == 'table' and G.notifyExistingWaiters then
+		G.NotifyResultsTable[event] = button.Id
+		G.notifyExistingWaiters(event)
+	else
+		self:spawn(G.CallFunctionName, button.OnPressedFunctionName, screen, button)
 	end
 end
 
@@ -2056,7 +2082,7 @@ function Game:bot_choose_upgrade()
 		if button and G.AcceptAndCloseSpellScreen then
 			spell.bot_chose = true
 			self.log('game: bot choosing the first hex')
-			self:spawn(G.AcceptAndCloseSpellScreen, spell, button)
+			self:bot_press(spell, button)
 		end
 		return
 	end
@@ -2100,6 +2126,11 @@ function Game:exit_blockers(room)
 	parts[#parts + 1] = 'blocking_screens=' .. table.concat(screens, ',')
 	parts[#parts + 1] = 'open_screens=' .. table.concat(open, ',')
 	parts[#parts + 1] = 'unlocked=' .. tostring(room and room.ExitsUnlocked)
+	-- What the room's scripts are waiting for (waitUntil's event names).
+	local waits = {}
+	for event in pairs(type(G._eventListeners) == 'table' and G._eventListeners or {}) do waits[#waits + 1] = tostring(event) end
+	table.sort(waits)
+	parts[#parts + 1] = 'waits=' .. table.concat(waits, ','):sub(1, 300)
 	return table.concat(parts, ' ')
 end
 

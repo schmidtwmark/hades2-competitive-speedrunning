@@ -17,6 +17,7 @@ const server = new RaceServer({
   matchGatherMs: Number(env.MATCH_GATHER_MS ?? 15_000),
   pools: { route: routes(env.ROUTES), weapon: WEAPONS, keepsake: KEEPSAKES },
   prepMs: Number(env.PREP_SECONDS ?? 120) * 1000,
+  fixedSeed: env.RACE_SEED ? Number(env.RACE_SEED) : undefined,
   scheduler: realScheduler,
   random: realRandom,
   log,

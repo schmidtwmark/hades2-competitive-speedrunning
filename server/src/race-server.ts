@@ -65,6 +65,8 @@ export interface ServerOptions {
   pools: Partial<Record<VotePhase, VoteOption[]>>;
   /** After the votes: time to set Arcana/aspect/familiar before the race starts anyway (default 120 s). */
   prepMs?: number;
+  /** Tests: every race uses this seed (replays a seed a bug showed up on). */
+  fixedSeed?: number;
   scheduler: Scheduler;
   random: Random;
   log: (line: string) => void;
@@ -812,7 +814,7 @@ export class RaceServer {
     lobby.raceCounter += 1;
     lobby.race = {
       race_id: lobby.raceCounter,
-      seed: 1 + this.opts.random.int(MAX_SEED - 1),
+      seed: this.opts.fixedSeed ?? 1 + this.opts.random.int(MAX_SEED - 1),
       weapon: lobby.selected.weapon ?? "",
       keepsake: lobby.selected.keepsake ?? "",
       route: lobby.selected.route ?? "",

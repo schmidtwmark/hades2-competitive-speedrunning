@@ -265,6 +265,13 @@ function Profile.build(G, saved)
 	G.CurrentRun = nil
 	G.StartNewRun(nil, { RoomName = 'F_Opening01', StartingBiome = 'F', SkipChooseEncounter = true, SkipChooseReward = true })
 	G.CurrentRun.Hero.IsDead = true -- we are in the hub; that run is over
+	-- The Crossroads' scripts read the last run's room encounter (ManaLogic's
+	-- regen loop: "attempt to index local 'encounter'" once Magick dropped, e.g.
+	-- on an aspect change); this bookkeeping room skipped choosing one.
+	local room = G.CurrentRun.CurrentRoom
+	if room and room.Encounter == nil and G.SetupEncounter and G.EncounterData and G.EncounterData.Empty then
+		room.Encounter = G.SetupEncounter(G.EncounterData.Empty, room)
+	end
 	local GS = G.GameState
 	-- The game's own guard: RequestSave skips every save while this is set.
 	GS.IllegalConversationModification = true

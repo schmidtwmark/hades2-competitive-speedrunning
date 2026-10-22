@@ -265,6 +265,20 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   StartRoomPresentation) that long. `Game:restart_script_clock` rebases waiting threads and sets it to
   0 on entry. Leftover script input blocks (tracked through AddInputBlock/RemoveInputBlock hooks) are
   released too. Gate: `scripts/e2e-reenter.sh` moves the hero with the stick on both visits.
+- **The last run's room** (0.5.9): in the Crossroads `CurrentRun` is the last run, and the hub's
+  scripts read its current room. The competitive profile's bookkeeping run (`StartNewRun` with
+  `SkipChooseEncounter`) left that room without an `Encounter`, and ManaLogic's `ManaRegen`
+  (started once Magick is below max; user report: after an aspect change) crashed indexing it,
+  leaving the script error up and the controls dead. `Profile.build` gives the room
+  `SetupEncounter(EncounterData.Empty)`. Gate: probe_prep lowers Magick, starts `ManaRegen` and
+  checks it climbs back.
+- **Pressing a screen button from code** (test bot, 0.5.9): `HandleScreenInput` waits on
+  `ScreenInput<screen name>` and reads the pressed id from `NotifyResultsTable`; closing a screen only
+  sets `KeepOpen = false`, so a handler called directly (`AcceptAndCloseSpellScreen`) leaves that loop
+  parked and whatever opened the screen never resumes. Opening rooms with Selene's hex stalled the
+  bot that way: the fight waits on `OnUsed<id>`, which the OnUsed handler sends only after
+  `OpenSpellScreen` returns. `Game:bot_press` sets the result and notifies, like a real press. The
+  local test server takes `RACE_SEED` (seed 824876918 opens with the hex).
 - **Presence** (0.5.6): the server sends `presence` {online, searching, racing} on hello and when the
   counts change (at most once a second); the board's home and Find Match pages show it. Older
   clients log it as unhandled; older servers never send it.
