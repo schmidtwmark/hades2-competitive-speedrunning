@@ -115,7 +115,7 @@ export class TestClient {
   }
 }
 
-/** Two greeted clients in one lobby, in the weapon vote. */
+/** Two greeted clients in one lobby, both ready: in the weapon vote. */
 export function pair(over: Partial<ServerOptions> = {}) {
   const env = makeServer(over);
   const a = new TestClient(env.server, "Alice");
@@ -125,11 +125,12 @@ export function pair(over: Partial<ServerOptions> = {}) {
   a.send({ type: "create_lobby" });
   const code = a.last("lobby_created").code;
   b.send({ type: "join_lobby", code });
-  a.send({ type: "start_race" }); // the host starts once the rival is in
+  a.send({ type: "ready" }); // voting starts once both are ready
+  b.send({ type: "ready" });
   return { ...env, a, b, code };
 }
 
-/** A private lobby with n racers (host first), started. */
+/** A private lobby with n racers (host first), all ready: voting. */
 export function group(n: number, over: Partial<ServerOptions> = {}) {
   const env = makeServer(over);
   const names = ["Alice", "Bob", "Cara", "Dion", "Eris", "Fae"];
@@ -141,7 +142,7 @@ export function group(n: number, over: Partial<ServerOptions> = {}) {
   cs[0]!.send({ type: "create_lobby" });
   const code = cs[0]!.last("lobby_created").code;
   for (const c of cs.slice(1)) c.send({ type: "join_lobby", code });
-  cs[0]!.send({ type: "start_race" });
+  for (const c of cs) c.send({ type: "ready" });
   return { ...env, cs, code };
 }
 

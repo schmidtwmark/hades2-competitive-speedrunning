@@ -194,13 +194,23 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   replayed). Pages are a pure function of client state (`Board.view`, unit tested).
   Weapon icons: each weapon's base aspect `TraitData[...].Icon`; keepsakes:
   `InRackIcon or Icon`. Code entry is an 8x4 on-screen keyboard of the server's code alphabet.
-- **Matchmaking** (2-5 racers per race, `maxPlayers`): Find Match joins an open public
-  lobby whose racers are all version-compatible (or opens one); once two are in it starts
-  by itself after `matchGatherMs` (15 s), or at once when full. Create Private Race (random
-  code) makes you the host, who presses Start Race (`start_race`) once everyone is in. Race
-  by Code (`join_lobby` with `create`: an unused code opens a lobby under it, so friends can
-  type an agreed code; the first one hosts). Joining a lobby that is already racing is
-  refused (`lobby_busy`).
+- **Matchmaking** (0.6.0): Find Match lobbies hold two (`matchPlayers`), private ones up to
+  five (`maxPlayers`). Find Match joins an open public lobby whose racer is version-compatible
+  (or opens one). Create Private Race makes a random code; Race by Code (`join_lobby` with
+  `create`: an unused code opens a lobby under it, so friends can type an agreed code).
+  Joining a lobby that is already racing is refused (`lobby_busy`). In "waiting", `ready`
+  (with `ready: false` to take it back) is ready to vote; the vote starts once everyone in the
+  lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
+  are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
+  client clears a vote's own and later `vote_results` when it opens.
+- **Practice** (0.6.0): `create_lobby` with `solo` starts voting at once with one racer (the
+  minimum for votes, ready and rematch is one; nobody can join). `bot` (or `add_bot` in a
+  private lobby still waiting) adds a house bot: a session with no transport whose
+  `BotBrain` (`server/src/bot-brain.ts`, shared with mock-client) votes "any", readies,
+  reports a room every `botRoomSeconds` (75 s; room names like `F_Bot3`, so the rival plate
+  says Erebus), forfeits once someone else clears and clears when every rival is out. Its
+  replies are scheduled 400 ms later, never inside the server's own loops. Bots don't count
+  as online and leave with the last person. Gate: `scripts/e2e-practice.sh race_bot|solo`.
 - **Rival plate** (`mod/src/hud.lua`, top right, Combat_UI group): HUD fonts/colours, the
   player's `HPBarFill` art (its fraction is the *missing* part), boon icons with
   `Frame_Boon_Menu_<Rarity>`; fades with the game's HUD while `MapState.CombatUIHide` is set.

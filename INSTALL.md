@@ -60,15 +60,18 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 
 ## Racing
 
-- Races have two to five racers.
-- **Find Match** puts you in a public race with whoever else is searching; once a
-  second racer is in, the setup starts by itself 15 seconds later (or at once with
-  five). **Create Private Race** gives you a 4-character code for your friends;
-  you are the host and press **Start Race** once everyone is in. **Race by Code**
-  joins a friend's code, or any code you agree on (the first to enter it opens the
-  race and hosts it).
+- **Find Match** pairs you with another racer who is searching. For more racers
+  (up to five), use a private race: **Create Private Race** gives you a 4-character
+  code for your friends, and **Race by Code** joins a friend's code, or any code you
+  agree on (the first to enter it opens the race).
+- Once your rivals are in, everyone presses **Ready to Vote** (Not Ready takes it
+  back); the vote starts when everyone is ready.
+- **Practice**: **Race a Bot** races the server's bot, which follows your votes,
+  shows its progress like a rival and never clears first. **Solo Run** votes and
+  races on your own. In a private race, **Add Bot** adds bots alongside your friends.
 - Vote on the route (Underworld, Surface or Dream Dive), the weapon and the keepsake (most
-  votes wins, ties are drawn at random).
+  votes wins, ties are drawn at random). Each vote shows what the earlier ones picked,
+  so you know the weapon when you choose a keepsake.
 - Then you have **2 minutes** in the Crossroads to set your Arcana, familiar and
   aspect. The voted weapon and keepsake are already equipped; other weapons and the
   keepsake rack stay locked until the race starts, and you can swap keepsakes

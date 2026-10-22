@@ -119,12 +119,15 @@ function UI:draw_body()
 	local phase = lobby.phase
 	if phase == 'waiting' then
 		if lobby.public then
-			local left = c:starts_in()
-			ImGui.Text(left and string.format('Starting in %ds', math.ceil(left)) or 'Searching for racers...')
+			ImGui.Text(#names > 0 and 'Rival found.' or 'Searching for a rival...')
 			if ImGui.Button('Cancel search') then c:cancel_match() end
 		else
 			ImGui.Text('Share the code ' .. lobby.code .. ' with your rivals.')
-			if c:is_host() and #names > 0 and ImGui.Button('Start race') then c:start_race() end
+			if ImGui.Button('Add bot') then c:add_bot() end
+		end
+		if #names > 0 then
+			local ready = c:is_ready()
+			if ImGui.Button(ready and 'Not ready' or 'Ready to vote') then c:ready(not ready) end
 		end
 	elseif tostring(phase):find('^voting_') then
 		self:draw_vote()

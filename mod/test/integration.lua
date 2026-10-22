@@ -52,9 +52,9 @@ while socket.gettime() < deadline and not events.result do
 		c:create_lobby()
 	end
 	local lobby = c.state.lobby
-	if not started and lobby and lobby.phase == 'waiting' and #(lobby.players or {}) >= 2 and c:is_host() then
+	if not started and lobby and lobby.phase == 'waiting' and #(lobby.players or {}) >= 2 then
 		started = true
-		c:start_race()
+		c:ready() -- ready to vote: the vote starts once the bot is too
 	end
 	if c:racing() then
 		local t = c:race_time()

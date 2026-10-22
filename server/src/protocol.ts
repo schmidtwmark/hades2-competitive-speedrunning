@@ -58,7 +58,8 @@ export interface Ghost {
 export type ClientMessage =
   /** version: the mod's version; game_build: the Hades II executable's link time (Unix seconds). */
   | { type: "hello"; name: string; version?: string; token?: string; game_build?: number }
-  | { type: "create_lobby" }
+  /** solo: race alone (voting starts at once); bot: a house bot joins the new lobby. */
+  | { type: "create_lobby"; solo?: boolean; bot?: boolean }
   | { type: "find_match" }
   | { type: "cancel_match" }
   /** create: if no lobby has this code yet, open one under it and wait (both racers can type an agreed code). */
@@ -67,16 +68,20 @@ export type ClientMessage =
   | { type: "vote_route"; route: string }
   | { type: "vote_weapon"; weapon: string }
   | { type: "vote_keepsake"; keepsake: string }
-  /** Ready for the start (in game: activating the voted route's start in the Crossroads). */
-  | { type: "ready" }
+  /**
+   * waiting: ready to vote (voting starts once everyone in the lobby is, two or more);
+   * ready: false takes it back. ready_check: ready for the start (in game: activating
+   * the voted route's start in the Crossroads).
+   */
+  | { type: "ready"; ready?: boolean }
   | ({ type: "progress_update" } & Progress)
   | { type: "run_complete"; time: number; victory: boolean; stats?: RunStats; build?: BuildEntry[] }
   | ({ type: "ghost" } & Ghost)
   /** Give up the run: a DNF, exactly like dying (the rival still has to finish to win). */
   | { type: "forfeit"; stats?: RunStats; build?: BuildEntry[] }
   | { type: "rematch" }
-  /** Host of a private lobby: stop waiting for more racers and start voting. */
-  | { type: "start_race" }
+  /** A private lobby still waiting: a house bot joins (votes "any", readies, never clears first). */
+  | { type: "add_bot" }
   /** A chat line to everyone in the lobby: one of the quick lines (chat.ts), nothing else. */
   | { type: "chat"; text: string }
   | { type: "ping"; t?: number };
@@ -114,6 +119,8 @@ export interface PlayerSummary {
   host: boolean;
   /** Asked for a rematch after the last race. */
   rematch: boolean;
+  /** A house bot (add_bot), not a person. */
+  bot: boolean;
 }
 
 /** Who a relayed message is about (races have up to five racers). */
@@ -160,11 +167,11 @@ export type ServerMessage =
       you: string;
       players: PlayerSummary[];
       race: RaceSetup | null;
-      /** A Find Match lobby (starts by itself) rather than a private one (the host starts it). */
+      /** A Find Match lobby (two racers) rather than a private one (shared by its code). */
       public: boolean;
+      /** A solo run: one racer, nobody else can join. */
+      solo: boolean;
       max_players: number;
-      /** Find Match lobbies: seconds until voting starts, once two racers are in. */
-      starts_in: number | null;
       /** ready_check: seconds until the race starts anyway (prep time for Arcana, aspect, familiar). */
       prep_ends_in: number | null;
     }
@@ -303,12 +310,14 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         game_build: optNum(o, "game_build"),
       };
     case "create_lobby":
+      return { type, ...(o.solo === true ? { solo: true } : {}), ...(o.bot === true ? { bot: true } : {}) };
+    case "ready":
+      return { type, ...(o.ready === false ? { ready: false } : {}) };
     case "find_match":
     case "cancel_match":
     case "leave_lobby":
-    case "ready":
     case "rematch":
-    case "start_race":
+    case "add_bot":
       return { type };
     case "forfeit":
       return { type, stats: optStats(o), build: optBuild(o) };

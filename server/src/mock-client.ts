@@ -11,7 +11,8 @@
 import net from "node:net";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { NO_PREFERENCE, type ServerMessage } from "./protocol.js";
+import { BotBrain } from "./bot-brain.js";
+import { type ServerMessage } from "./protocol.js";
 
 export interface MockOptions {
   host: string;
@@ -30,7 +31,7 @@ export interface MockOptions {
   progressEvery: number;
   quiet: boolean;
   timeout: number;
-  /** As host of a private lobby, start the race once this many racers are in (default 2). */
+  /** Ready to vote once this many racers are in (default 2). */
   startAt?: number;
   /** Vote "any" in every vote, so the other racers' picks decide (and the vote ends once they voted). */
   follow?: boolean;
@@ -62,6 +63,7 @@ export function runMock(o: MockOptions): Promise<MockResult> {
       res.ok = error === null && res.result !== null;
       timers.forEach(clearTimeout);
       timers.forEach(clearInterval);
+      brain.stop();
       sock.end();
       resolve(res);
     };
@@ -71,11 +73,23 @@ export function runMock(o: MockOptions): Promise<MockResult> {
       if (!o.quiet) console.log(JSON.stringify(m));
     };
 
-    let raceStart = 0;
-    let startSent = false;
-    let depth = 0;
+    const brain = new BotBrain(
+      {
+        follow: o.follow,
+        route: o.route,
+        weapon: o.weapon,
+        keepsake: o.keepsake,
+        outcome: o.outcome,
+        finishAfter: o.finishAfter,
+        progressEvery: o.progressEvery,
+        readyAt: o.startAt,
+      },
+      send,
+      { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout), now: () => Date.now() },
+    );
     const handle = (m: ServerMessage) => {
       log(m);
+      brain.handle(m);
       switch (m.type) {
         case "welcome":
           if (o.create) send({ type: "create_lobby" });
@@ -102,55 +116,11 @@ export function runMock(o: MockOptions): Promise<MockResult> {
         case "lobby_joined":
           res.code = m.code;
           break;
-        case "vote_phase": {
-          const want = m.phase === "route" ? o.route : m.phase === "weapon" ? o.weapon : o.keepsake;
-          const choice = o.follow ? NO_PREFERENCE : (want ?? m.options[0]?.id);
-          if (choice) send({ type: `vote_${m.phase}`, [m.phase]: choice });
-          break;
-        }
-        case "lobby_state": {
-          const me = m.players.find((p) => p.id === m.you);
-          if (m.phase === "ready_check" && !me?.ready) send({ type: "ready" });
-          // Host of a private lobby: start once enough racers are in.
-          if (m.phase === "waiting" && !m.public && me?.host && m.players.length >= (o.startAt ?? 2) && !startSent) {
-            startSent = true;
-            send({ type: "start_race" });
-          }
-          if (m.phase !== "waiting") startSent = false;
-          break;
-        }
         case "race_start":
           res.race = { seed: m.seed, weapon: m.weapon, keepsake: m.keepsake, route: m.route };
-          timers.push(
-            setTimeout(() => {
-              raceStart = Date.now();
-              const elapsed = () => (Date.now() - raceStart) / 1000;
-              timers.push(
-                setInterval(() => {
-                  depth += 1;
-                  send({ type: "progress_update", room: `MockRoom${depth}`, biome: "F", depth, hp: 100, max_hp: 100, time: elapsed(), alive: true });
-                }, o.progressEvery * 1000),
-              );
-              if (o.outcome !== "none") {
-                timers.push(
-                  setTimeout(() => send({ type: "run_complete", victory: o.outcome === "win", time: elapsed() }), o.finishAfter * 1000),
-                );
-              }
-            }, m.countdown_ms),
-          );
           break;
         case "opponent_progress":
           res.opponentProgress += 1;
-          break;
-        case "opponent_finished":
-          // Rival dropped out (died/forfeited) and we have no scripted finish: finish our run shortly.
-          if (!m.victory && o.outcome === "none") {
-            timers.push(setTimeout(() => send({ type: "run_complete", victory: true, time: (Date.now() - raceStart) / 1000 }), 2000));
-          }
-          break;
-        case "race_decided":
-          // Lost with no scripted finish: give up like a player would, which ends the race.
-          if (!m.you_won && o.outcome === "none") send({ type: "forfeit" });
           break;
         case "race_result":
           res.result = m;

@@ -136,10 +136,15 @@ end
 
 -- actions -----------------------------------------------------------------------
 
-function Client:create_lobby()
+-- how.solo: race alone (the vote starts at once); how.bot: a house bot joins.
+function Client:create_lobby(how)
+	how = how or {}
 	self.state.mismatch = nil
-	return self:send({ type = 'create_lobby' })
+	return self:send({ type = 'create_lobby', solo = how.solo or nil, bot = how.bot or nil })
 end
+
+-- A private lobby still waiting: a house bot joins (it follows the votes).
+function Client:add_bot() return self:send({ type = 'add_bot' }) end
 
 -- create=true: if nobody has opened this code yet, open it and wait there,
 -- so two racers can both type a code they agreed on.
@@ -151,17 +156,14 @@ end
 
 function Client:leave_lobby() return self:send({ type = 'leave_lobby' }) end
 
--- Find Match: the server puts us in an open public lobby (or opens one); it
--- starts by itself once a few racers are in.
+-- Find Match: the server pairs us with another racer (or opens a lobby and
+-- waits); the vote starts once both are ready.
 function Client:find_match()
 	self.state.mismatch = nil
 	local ok = self:send({ type = 'find_match' })
 	if ok then self.state.queue = { since = self.now(), waiting = nil } end
 	return ok
 end
-
--- Private lobby host: start the race setup with whoever has joined.
-function Client:start_race() return self:send({ type = 'start_race' }) end
 
 function Client:cancel_match()
 	self.state.queue = nil
@@ -174,7 +176,21 @@ function Client:vote(phase, choice)
 	return ok
 end
 
-function Client:ready() return self:send({ type = 'ready' }) end
+-- Waiting: ready to vote (false takes it back). Ready check: ready for the start.
+function Client:ready(flag)
+	local msg = { type = 'ready' }
+	if flag == false then msg.ready = false end
+	return self:send(msg)
+end
+
+-- Whether we are marked ready in the lobby.
+function Client:is_ready()
+	local l = self.state.lobby
+	for _, p in ipairs(l and l.players or {}) do
+		if p.id == l.you then return p.ready == true end
+	end
+	return false
+end
 
 -- A chat line to everyone in the lobby (the server echoes it back to us too).
 function Client:chat(text)
@@ -298,9 +314,6 @@ local function remaining(c, field)
 	if not (l and type(l[field]) == 'number') then return nil end
 	return math.max(0, l[field] - (c.now() - (l.received or c.now())))
 end
-
--- Seconds until a Find Match lobby starts by itself (nil when not counting).
-function Client:starts_in() return remaining(self, 'starts_in') end
 
 -- Seconds of prep left before the race starts anyway (ready check only).
 function Client:prep_left() return remaining(self, 'prep_ends_in') end
@@ -444,7 +457,15 @@ function handlers.lobby_state(c, m)
 	if prev and prev.phase ~= m.phase then c:_emit('phase', m.phase, prev.phase) end
 end
 
+-- The order the server votes in: a vote opening clears its own and later
+-- results (a rematch votes again without passing through "waiting").
+local VOTE_ORDER = { route = 1, weapon = 2, keepsake = 3 }
+
 function handlers.vote_phase(c, m)
+	local at = VOTE_ORDER[m.phase] or 1
+	for phase, i in pairs(VOTE_ORDER) do
+		if i >= at then c.state.vote_results[phase] = nil end
+	end
 	c.state.vote = { phase = m.phase, options = m.options or {}, deadline = c.now() + (m.timer or 0), voters = {} }
 	c:_emit('vote_phase', c.state.vote)
 end
@@ -457,6 +478,11 @@ function handlers.vote_cast(c, m)
 end
 
 function handlers.vote_result(c, m)
+	-- The winning option's name, from the vote that just closed (routes have no other).
+	local v = c.state.vote
+	for _, o in ipairs(v and v.phase == m.phase and v.options or {}) do
+		if o.id == m.selected then m.name = o.name end
+	end
 	c.state.vote_results[m.phase] = m
 	c:_emit('vote_result', m)
 end

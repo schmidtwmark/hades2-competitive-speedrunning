@@ -1,6 +1,6 @@
 -- The Race Board: a native, controller-first screen for everything before
--- and after a race (Find Match, private lobby codes, votes, ready, results),
--- for races of two up to five racers.
+-- and after a race (Find Match, private lobby codes, practice against a bot
+-- or alone, votes, ready, results), for races of one up to five racers.
 -- It is built like the game's own menus (OnScreenOpened, CreateScreenFromData,
 -- interactable screen components, NotifyOnInteractOrControlPressed), so the
 -- gamepad cursor, Confirm and Cancel work exactly as in the Keepsake rack.
@@ -308,6 +308,16 @@ function Board.view(c, ui, now, names)
 			d.id = d.id .. (full and ':full' or '')
 			return d
 		end
+		if ui.page == 'practice' then
+			d.id, d.title = 'practice', 'Practice'
+			line('Race a bot: it follows your votes, reports its rooms and never clears first.')
+			line('Solo Run: vote and race on your own, for your splits.', GREY)
+			button('race_bot', 'Race a Bot', 'race_bot')
+			button('solo', 'Solo Run', 'solo')
+			button('back', 'Back', 'home')
+			d.cancel = { action = 'home', label = '{CN} Back' }
+			return d
+		end
 		d.id, d.title = 'home', 'Competitive Speedrun'
 		line('Racing as ' .. Board.safe(c.name))
 		if st.mismatch then
@@ -323,6 +333,7 @@ function Board.view(c, ui, now, names)
 		button('find', 'Find Match', 'find')
 		button('create', 'Create Private Race', 'create')
 		button('join_page', 'Race by Code', 'join_page')
+		button('practice', 'Practice', 'practice')
 		button('about', 'About', 'about')
 		return d
 	end
@@ -331,15 +342,22 @@ function Board.view(c, ui, now, names)
 	local opp = Board.safe(#rivals == 1 and rivals[1].name or 'your rivals')
 	local players = lobby.players or {}
 	local phase = lobby.phase
-	-- Everyone in the lobby, one line each.
+	-- Everyone in the lobby, one line each; ready racers in green.
 	local function roster()
 		for _, p in ipairs(players) do
 			local tags = {}
 			if p.id == lobby.you then tags[#tags + 1] = 'you' end
-			if p.host and not lobby.public then tags[#tags + 1] = 'host' end
+			if p.bot then tags[#tags + 1] = 'bot' end
+			if p.ready then tags[#tags + 1] = 'ready' end
 			line(Board.safe(p.name) .. (#tags > 0 and ('  (' .. table.concat(tags, ', ') .. ')') or ''),
-				p.connected == false and GREY or BODY)
+				p.connected == false and GREY or (p.ready and GREEN or BODY))
 		end
+	end
+	-- Waiting: the vote starts once everyone here (two or more) is ready.
+	local me_ready = c:is_ready()
+	local function ready_buttons()
+		if me_ready then button('unready', 'Not Ready', 'unready') else button('ready', 'Ready to Vote', 'ready') end
+		d.focus = me_ready and 'unready' or 'ready'
 	end
 	-- Names of the other players for whom pred(p) is false.
 	local function waiting_on(pred)
@@ -349,9 +367,27 @@ function Board.view(c, ui, now, names)
 		end
 		return out
 	end
+	-- What the earlier votes picked, a gold line each, the latest first (the
+	-- first line is drawn large; two picks on it don't fit).
+	local function picked(phases)
+		local parts = {}
+		for _, phase in ipairs(phases) do
+			local r = st.vote_results[phase]
+			local id = r and r.selected
+			if id and id ~= '' then
+				local shown = phase == 'route' and (Board.ROUTE_NAMES[id] or r.name or id) or names(id)
+				if shown == id and r.name then shown = r.name end
+				parts[#parts + 1] = (phase == 'route' and 'Route: ' or 'Weapon: ') .. Board.safe(shown)
+				line(parts[#parts], GOLD)
+			end
+		end
+		return table.concat(parts, '|')
+	end
 	-- Who has voted, and the time left.
 	local function vote_status(v, left)
-		if #rivals == 1 then
+		if #rivals == 0 then
+			line('Solo run   -   ' .. left .. 's left')
+		elseif #rivals == 1 then
 			line('vs ' .. opp .. '   -   ' .. left .. 's left')
 			line((v.voters or {})[rivals[1].id] and (opp .. ' has voted.') or (opp .. ' is choosing...'), GREY)
 		else
@@ -360,48 +396,47 @@ function Board.view(c, ui, now, names)
 		end
 	end
 	if phase == 'waiting' and lobby.public then
-		-- Find Match: more racers can join until the setup starts by itself.
+		-- Find Match: two racers; the vote starts once both are ready.
 		local n, alone = #players, #players < 2
-		d.id, d.title = 'waiting:public:' .. n, 'Finding Rivals'
+		d.id, d.title = 'waiting:public:' .. n .. ':' .. tostring(me_ready), alone and 'Finding a Rival' or 'Rival Found'
 		if alone and st.mismatch then
 			for _, l in ipairs(Board.mismatch_lines(st.mismatch)) do line(l.text, l.color) end
 			d.id = d.id .. ':mismatch'
 		elseif alone then
-			line('Searching for other racers...')
+			line('Searching for another racer...')
 			local online = Board.presence_text(st.presence)
 			if online then line(online, GREY) end
-		else
-			line(n .. ' racers found (up to ' .. (lobby.max_players or n) .. ').')
 		end
 		roster()
-		local left = c:starts_in()
-		if left then
-			line('The race setup starts in ' .. math.ceil(left) .. 's.', GOLD)
-		elseif alone then
+		if alone then
 			line('Waiting ' .. fmt_clock(now - (st.search_since or now)):gsub('%.%d+$', ''), GREY)
+		else
+			local others = waiting_on(function(p) return p.ready end)
+			line(#others > 0 and ('The vote starts when you are both ready.') or (opp .. ' is ready.'), GREY)
+			ready_buttons()
+			button('chat', 'Chat', 'chat')
 		end
 		button('cancel_search', 'Cancel Search', 'cancel_queue')
-		if n >= 2 then button('chat', 'Chat', 'chat') end
 		d.cancel = { action = 'cancel_queue', label = '{CN} Cancel' }
 	elseif phase == 'waiting' then
-		local n, host = #players, c:is_host()
-		d.id, d.title = 'waiting:' .. n .. ':' .. tostring(host), 'Private Race'
+		local n = #players
+		local full = n >= (lobby.max_players or 5)
+		d.id, d.title = 'waiting:private:' .. n .. ':' .. tostring(me_ready), 'Private Race'
 		line('Code  ' .. (lobby.code or '????'):gsub('.', '%0 '):gsub(' $', ''), GOLD)
 		line('Share this code with your rivals (up to ' .. (lobby.max_players or 2) .. ' racers).', GREY)
 		roster()
-		if not host then
-			local host_name = 'the host'
-			for _, p in ipairs(players) do
-				if p.host then host_name = Board.safe(p.name) end
-			end
-			line('Waiting for ' .. host_name .. ' to start the race...', GREY)
-		elseif n >= 2 then
-			button('start', 'Start Race', 'start')
+		if n >= 2 then
+			local others = waiting_on(function(p) return p.ready end)
+			line(#others > 0 and ('The vote starts when everyone is ready. Waiting for ' .. Board.join_names(others) .. '.')
+				or 'The vote starts when everyone is ready.', GREY)
+			ready_buttons()
 		else
-			line('Waiting for a rival to join...')
+			line('Waiting for a rival to join, or add a bot.')
 		end
+		if not full then button('add_bot', 'Add Bot', 'add_bot') end
 		if n >= 2 then button('chat', 'Chat', 'chat') end
 		button('leave', 'Leave Race', 'leave')
+		d.button_cols = #d.buttons > 3 and 2 or nil
 	elseif phase == 'voting_route' then
 		-- Where the run goes: a column of text buttons (no icons for routes).
 		local v = st.vote or { options = {} }
@@ -420,6 +455,7 @@ function Board.view(c, ui, now, names)
 		local v = st.vote or { options = {} }
 		d.title = kind == 'weapon' and 'Vote: Weapon' or 'Vote: Keepsake'
 		local left = math.max(0, math.ceil((v.deadline or now) - now))
+		local earlier = picked(kind == 'weapon' and { 'route' } or { 'weapon', 'route' })
 		vote_status(v, left)
 		d.grid = { kind = kind, cols = kind == 'weapon' and 6 or 11, items = {} }
 		local keys = {}
@@ -432,7 +468,7 @@ function Board.view(c, ui, now, names)
 		end
 		button('leave', 'Leave Race', 'leave')
 		d.focus = v.mine and ('opt_' .. v.mine) or (d.grid.items[1] and d.grid.items[1].key)
-		d.id = 'vote_' .. kind .. ':' .. #keys .. ':' .. tostring(keys[1]) .. ':' .. tostring(v.mine)
+		d.id = 'vote_' .. kind .. ':' .. #keys .. ':' .. tostring(keys[1]) .. ':' .. tostring(v.mine) .. ':' .. earlier
 	elseif phase == 'ready_check' then
 		local me_ready = false
 		for _, p in ipairs(players) do
@@ -454,7 +490,7 @@ function Board.view(c, ui, now, names)
 		end
 		if #not_ready > 0 then
 			line('Waiting for ' .. Board.join_names(not_ready) .. '...', GREY)
-		else
+		elseif #rivals > 0 then
 			line(#rivals == 1 and (opp .. ' is ready.') or 'Everyone else is ready.', GREEN)
 		end
 		d.show = { { kind = 'weapon', id = w }, { kind = 'keepsake', id = k } }
@@ -507,10 +543,18 @@ function Board.view(c, ui, now, names)
 		d.id = 'racing:' .. tostring(dec and dec.you_won) .. ':' .. state .. ':' .. #d.lines
 	elseif phase == 'finished' then
 		local r = st.result or {}
+		local solo = lobby.solo or #(r.results or {}) == 1
 		d.id = 'finished:' .. tostring(st.rematch_requested)
-		d.title = r.draw and 'Draw' or (r.you_won and 'Victory' or 'Defeat')
-		d.title_color = r.draw and GOLD or (r.you_won and GREEN or RED)
-		line(REASONS[r.reason] or '', GREY)
+		if solo then
+			d.title = r.you_won and 'Run Cleared' or 'Run Over'
+			d.title_color = r.you_won and GREEN or RED
+			local e = (r.results or {})[1]
+			if e then line(Board.result_line(e)) end
+		else
+			d.title = r.draw and 'Draw' or (r.you_won and 'Victory' or 'Defeat')
+			d.title_color = r.draw and GOLD or (r.you_won and GREEN or RED)
+			line(REASONS[r.reason] or '', GREY)
+		end
 		if ui.pb_line then line(ui.pb_line, GOLD) end -- your clear against your personal best (game.lua)
 		local results = r.results or {}
 		if #results == 2 then
@@ -526,9 +570,9 @@ function Board.view(c, ui, now, names)
 			local others = waiting_on(function(p) return p.rematch end)
 			line('Rematch requested. Waiting for ' .. (#others > 0 and Board.join_names(others) or 'the others') .. '...', GREY)
 		else
-			button('rematch', 'Rematch', 'rematch')
+			button('rematch', solo and 'Run Again' or 'Rematch', 'rematch')
 		end
-		button('chat', 'Chat', 'chat')
+		if not solo then button('chat', 'Chat', 'chat') end
 		button('leave', 'Leave Race', 'leave')
 	else
 		d.id, d.title = 'phase:' .. tostring(phase), 'Competitive Speedrun'
@@ -561,8 +605,8 @@ end
 
 function Board.wants_attention(id)
 	if id == nil then return false end
-	-- A private lobby's host, once someone joins: Start Race is up to them.
-	local joined = tonumber(id:match('^waiting:(%d+):true$'))
+	-- A lobby with a rival in it, while we aren't ready to vote yet.
+	local joined = tonumber(id:match('^waiting:%a+:(%d+):false'))
 	-- Your run is over while others race on: your result and their progress.
 	local out = id:match("^racing:[^:]*:(%a+):")
 	return id:find('^vote_') ~= nil or id:find('^ready:false') ~= nil or id:find('^finished') ~= nil
@@ -592,10 +636,18 @@ function Board:act(action, arg)
 		c:find_match()
 	elseif action == 'cancel_queue' then
 		c:cancel_match()
-	elseif action == 'start' then
-		c:start_race()
 	elseif action == 'create' then
 		c:create_lobby()
+	elseif action == 'practice' then
+		ui.page = 'practice'
+	elseif action == 'race_bot' then
+		ui.page = nil
+		c:create_lobby({ bot = true })
+	elseif action == 'solo' then
+		ui.page = nil
+		c:create_lobby({ solo = true })
+	elseif action == 'add_bot' then
+		c:add_bot()
 	elseif action == 'join_page' then
 		ui.page, ui.code = 'code', ''
 	elseif action == 'home' then
@@ -614,6 +666,8 @@ function Board:act(action, arg)
 		if v then c:vote(v.phase, arg) end
 	elseif action == 'ready' then
 		c:ready()
+	elseif action == 'unready' then
+		c:ready(false)
 	elseif action == 'rematch' then
 		c:rematch()
 	elseif action == 'leave' then

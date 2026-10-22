@@ -7,8 +7,9 @@
 --   role          "host" | "join" | "queue" (Find Match; both bots queue)
 --                 | "code" (both type race_code; the first opens it)
 --                 | "pad" (hands off the lobby: a real controller drives the board)
+--                 | "race_bot" | "solo" (Practice: against the server's house bot, or alone)
 --   code_file     host writes the lobby code here, joiner polls it
---   start_at      private lobby host: press Start Race once this many racers are in (default 2)
+--   start_at      ready to vote once this many racers are in (default 2)
 --   weapon, keepsake  what to vote for (default: first option)
 --   rooms         room transitions to drive before the outcome (default 2)
 --   outcome       "win" | "die" | "forfeit" (pause-menu path: prompt, then Forfeit) | "none"
@@ -34,6 +35,8 @@
 --   preview_split once the race run is live, record a region split by hand (screenshots)
 --   preview_count show this countdown text in the Crossroads (font screenshots)
 --   press_competitive_again  also press the title-screen entry after a quit to the menu
+--   expect_rival  a rival of this name must have reported progress by the result
+--   expect_results  how many racers the results list
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
 
@@ -352,6 +355,10 @@ function Bot:step_wait_game(now, c)
 		elseif self.cfg.role == 'host' then
 			self:lobby_action({ 'create' }, function() c:create_lobby() end)
 			self:go_step('hosting')
+		elseif self.cfg.role == 'race_bot' or self.cfg.role == 'solo' then
+			local how = self.cfg.role == 'solo' and { solo = true } or { bot = true }
+			self:lobby_action({ 'practice', self.cfg.role }, function() c:create_lobby(how) end)
+			self:go_step('hosting')
 		elseif self.cfg.role == 'queue' then
 			self:lobby_action({ 'find' }, function() c:find_match() end)
 			self:go_step('queueing')
@@ -370,7 +377,7 @@ end
 
 function Bot:step_hosting(now, c, st)
 	local lobby = st.lobby
-	if lobby and lobby.code and not self.code_written then
+	if lobby and lobby.code and self.cfg.code_file and not self.code_written then
 		local f = io.open(self.cfg.code_file, 'w')
 		if f then
 			f:write(lobby.code, '\n')
@@ -430,13 +437,22 @@ end
 
 function Bot:step_lobby(now, c, st)
 	local phase = c:phase()
-	-- Private lobby host (also the first to enter a race code): start once enough racers are in.
+	-- Ready to vote once enough racers are in (the vote starts when everyone is).
 	local lobby = st.lobby
-	if phase == 'waiting' and lobby and not lobby.public and c:is_host() and not self.start_sent
+	if phase ~= 'waiting' then self.vote_ready_sent = false end
+	if phase == 'waiting' and lobby and not c:is_ready() and not self.vote_ready_sent
 		and #(lobby.players or {}) >= (self.cfg.start_at or 2) and not self:wait_dwell('start', now) then
-		self.start_sent = true
+		self.vote_ready_sent = true
 		self:check('lobby filled', true, #lobby.players .. ' racers')
-		self:lobby_action({ 'start' }, function() c:start_race() end)
+		self:lobby_action({ 'ready' }, function() c:ready() end)
+	end
+	-- The keepsake vote says which weapon won the vote before it.
+	local d = self.board and self.board.desc
+	if phase == 'voting_keepsake' and self.cfg.use_board and not self.picks_checked and d
+		and tostring(d.id):find('^vote_keepsake') then
+		self.picks_checked = true
+		local first = d.lines[1] and d.lines[1].text or ''
+		self:check('keepsake vote shows the weapon pick', first:find('Weapon: ') ~= nil, first)
 	end
 	local v = self.pending_vote
 	if v and st.vote and st.vote.phase == v.phase and not self:wait_dwell('vote_' .. v.phase, now) then
@@ -814,6 +830,16 @@ function Bot:step_result(now, c, st)
 	end
 	if self.cfg.expect_reason then
 		self:check('expected reason', r.reason == self.cfg.expect_reason, 'reason=' .. tostring(r.reason))
+	end
+	if self.cfg.expect_rival then
+		local depth
+		for _, rival in ipairs(c:rivals()) do
+			if rival.name == self.cfg.expect_rival then depth = rival.progress and rival.progress.depth end
+		end
+		self:check('rival ' .. self.cfg.expect_rival .. ' reported its rooms', (depth or 0) >= 1, 'depth=' .. tostring(depth))
+	end
+	if self.cfg.expect_results then
+		self:check('results list', #(r.results or {}) == self.cfg.expect_results, #(r.results or {}) .. ' racers')
 	end
 	self:finish(true, string.format('reason=%s you_won=%s', tostring(r.reason), tostring(r.you_won)))
 end

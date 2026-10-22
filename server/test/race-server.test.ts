@@ -44,7 +44,7 @@ describe("lobbies", () => {
     assert.equal(a.state().players.length, 1);
   });
 
-  it("join notifies both players; the host's start opens the weapon vote", () => {
+  it("join notifies both players; voting opens once both are ready", () => {
     const { a, b, code } = pair();
     assert.equal(a.last("lobby_joined").opponent, "Bob");
     assert.equal(b.last("lobby_joined").opponent, "Alice");
@@ -496,56 +496,61 @@ describe("disconnects", () => {
 });
 
 describe("find match", () => {
-  it("the first racer opens a Find Match lobby; the second starts a gather; voting starts after it", () => {
-    const { server, scheduler } = makeServer({ matchGatherMs: 15_000 });
+  it("pairs two racers; voting starts once both are ready, and ready can be taken back", () => {
+    const { server } = makeServer();
     const a = new TestClient(server, "A");
     const b = new TestClient(server, "B");
     a.hello();
     b.hello();
     a.send({ type: "find_match" });
     assert.equal(a.state().public, true);
-    assert.equal(a.state().starts_in, null);
+    assert.equal(a.state().max_players, 2);
     b.send({ type: "find_match" });
     assert.equal(a.state().players.length, 2);
-    assert.equal(a.state().starts_in, 15);
-    assert.equal(a.all("vote_phase").length, 0);
-    scheduler.advance(15_000);
+    a.send({ type: "ready" });
+    assert.equal(b.state().players[0]!.ready, true);
+    a.send({ type: "ready", ready: false });
+    assert.equal(b.state().players[0]!.ready, false);
+    b.send({ type: "ready" });
+    assert.equal(a.all("vote_phase").length, 0, "A took it back");
+    a.send({ type: "ready" });
     assert.equal(a.last("vote_phase").phase, "weapon");
     assert.equal(b.state().phase, "voting_weapon");
     assert.equal(server.lobbyCount, 1);
   });
 
-  it("more racers join during the gather; a full lobby starts at once", () => {
-    const { server, scheduler } = makeServer({ maxPlayers: 3 });
-    const cs = ["A", "B", "C", "D"].map((n) => {
+  it("races two: a third racer opens the next lobby", () => {
+    const { server } = makeServer();
+    const cs = ["A", "B", "C"].map((n) => {
       const c = new TestClient(server, n);
       c.hello();
+      c.send({ type: "find_match" });
       return c;
     });
-    cs[0]!.send({ type: "find_match" });
-    cs[1]!.send({ type: "find_match" });
-    scheduler.advance(5_000);
-    cs[2]!.send({ type: "find_match" });
-    assert.equal(cs[0]!.last("vote_phase").phase, "weapon", "full: no more waiting");
-    cs[3]!.send({ type: "find_match" });
-    assert.equal(cs[3]!.state().players.length, 1, "a new lobby for the next racer");
+    assert.equal(cs[0]!.state().players.length, 2);
+    assert.equal(cs[2]!.state().players.length, 1, "a new lobby for the next racer");
     assert.equal(server.lobbyCount, 2);
   });
 
-  it("cancel leaves the lobby; one racer left stops the gather", () => {
-    const { server, scheduler } = makeServer();
-    const a = new TestClient(server, "A");
-    const b = new TestClient(server, "B");
-    a.hello();
-    b.hello();
+  it("cancel leaves the lobby; the one left searches on, still ready", () => {
+    const { server } = makeServer();
+    const [a, b, c] = ["A", "B", "C"].map((n) => {
+      const t = new TestClient(server, n);
+      t.hello();
+      return t;
+    }) as [TestClient, TestClient, TestClient];
     a.send({ type: "find_match" });
     b.send({ type: "find_match" });
+    a.send({ type: "ready" });
     b.send({ type: "cancel_match" });
     assert.ok(b.last("match_cancelled"));
     assert.equal(a.state().players.length, 1);
-    assert.equal(a.state().starts_in, null);
-    scheduler.advance(60_000);
-    assert.equal(a.all("vote_phase").length, 0);
+    assert.equal(a.state().phase, "waiting");
+    assert.equal(a.state().players[0]!.ready, true);
+    c.send({ type: "find_match" });
+    assert.equal(c.state().code, a.state().code);
+    c.send({ type: "ready" });
+    assert.equal(a.last("vote_phase").phase, "weapon");
   });
 
   it("refuses while already in a lobby", () => {
@@ -556,18 +561,16 @@ describe("find match", () => {
 });
 
 describe("races with more than two", () => {
-  it("up to five racers; only the host starts, and only with company", () => {
+  it("up to five racers; voting starts once all of them are ready, and never alone", () => {
     const { server } = makeServer();
     const cs = ["Alice", "Bob", "Cara", "Dion", "Eris", "Fae"].map((n) => {
       const c = new TestClient(server, n);
       c.hello();
       return c;
     });
-    cs[0]!.send({ type: "start_race" });
-    assert.equal(cs[0]!.last("error").code, "not_waiting");
     cs[0]!.send({ type: "create_lobby" });
-    cs[0]!.send({ type: "start_race" });
-    assert.equal(cs[0]!.last("error").code, "need_players");
+    cs[0]!.send({ type: "ready" });
+    assert.equal(cs[0]!.state().phase, "waiting", "ready alone: still waiting for a rival");
     const code = cs[0]!.last("lobby_created").code;
     for (const c of cs.slice(1)) c.send({ type: "join_lobby", code });
     assert.equal(cs[5]!.last("error").code, "lobby_full");
@@ -575,10 +578,25 @@ describe("races with more than two", () => {
     assert.equal(st.players.length, 5);
     assert.equal(st.players[0]!.host, true);
     assert.equal(st.max_players, 5);
-    cs[1]!.send({ type: "start_race" });
-    assert.equal(cs[1]!.last("error").code, "not_host");
-    cs[0]!.send({ type: "start_race" });
+    for (const c of cs.slice(1, 4)) c.send({ type: "ready" });
+    assert.equal(cs[0]!.all("vote_phase").length, 0, "Eris isn't ready");
+    cs[4]!.send({ type: "ready" });
     for (const c of cs.slice(0, 5)) assert.equal(c.last("vote_phase").phase, "weapon");
+  });
+
+  it("someone leaving before the vote can be the last one awaited", () => {
+    const { server } = makeServer();
+    const cs = ["Alice", "Bob", "Cara"].map((n) => {
+      const c = new TestClient(server, n);
+      c.hello();
+      return c;
+    });
+    cs[0]!.send({ type: "create_lobby" });
+    for (const c of cs.slice(1)) c.send({ type: "join_lobby", code: cs[0]!.last("lobby_created").code });
+    cs[0]!.send({ type: "ready" });
+    cs[1]!.send({ type: "ready" });
+    cs[2]!.send({ type: "leave_lobby" });
+    assert.equal(cs[0]!.last("vote_phase").phase, "weapon");
   });
 
   it("most votes wins; a tie picks among the tied", () => {
@@ -688,7 +706,8 @@ describe("join by code (create if missing)", () => {
     assert.equal(a.last("lobby_created").code, "WXYZ");
     b.send({ type: "join_lobby", code: "WXYZ", create: true });
     assert.equal(b.last("lobby_joined").opponent, "A");
-    a.send({ type: "start_race" });
+    a.send({ type: "ready" });
+    b.send({ type: "ready" });
     assert.equal(a.last("vote_phase").phase, "weapon");
   });
 
@@ -793,7 +812,7 @@ describe("presence", () => {
     const sent = b.all("presence").length;
     scheduler.advance(5000);
     assert.equal(b.all("presence").length, sent, "nothing new: nothing sent");
-    b.send({ type: "find_match" }); // pairs with Ann; the setup starts later
+    b.send({ type: "find_match" }); // pairs with Ann; voting waits for both to ready
     scheduler.advance(1000);
     assert.equal(a.last("presence").searching, 2);
     b.conn.close();
@@ -845,5 +864,124 @@ describe("chat", () => {
     lone.hello();
     lone.send({ type: "chat", text: "hi" });
     assert.equal(lone.last("error").code, "not_in_lobby");
+  });
+});
+
+describe("solo runs", () => {
+  it("vote alone at once, ready alone, race alone; a clear is a win and a rematch is yours to start", () => {
+    const { server, scheduler } = makeServer();
+    const a = new TestClient(server, "Ann");
+    a.hello();
+    a.send({ type: "create_lobby", solo: true });
+    assert.equal(a.state().solo, true);
+    assert.equal(a.last("vote_phase").phase, "weapon");
+    a.send({ type: "vote_weapon", weapon: "WeaponAxe" });
+    assert.equal(a.last("vote_result").selected, "WeaponAxe", "no one else to wait for");
+    a.send({ type: "vote_keepsake", keepsake: "KeepsakeB" });
+    assert.equal(a.state().phase, "ready_check");
+    a.send({ type: "ready" });
+    assert.equal(a.last("race_start").weapon, "WeaponAxe");
+    scheduler.advance(3000);
+    a.send({ type: "run_complete", victory: true, time: 100 });
+    const r = a.last("race_result");
+    assert.equal(r.you_won, true);
+    assert.equal(r.results.length, 1);
+    a.send({ type: "rematch" });
+    assert.equal(a.state().phase, "voting_weapon");
+  });
+
+  it("nobody can join a solo run", () => {
+    const { server } = makeServer();
+    const a = new TestClient(server, "Ann");
+    const b = new TestClient(server, "Bob");
+    a.hello();
+    b.hello();
+    a.send({ type: "create_lobby", solo: true });
+    b.send({ type: "join_lobby", code: a.state().code });
+    assert.equal(b.last("error").code, "lobby_full");
+    a.send({ type: "add_bot" });
+    assert.equal(a.last("error").code, "not_waiting");
+  });
+});
+
+describe("house bots", () => {
+  const ROOM = 75_000;
+
+  /** Ann in a private lobby with a house bot, both ready, through the votes and the countdown. */
+  function raceTheBot() {
+    const env = makeServer();
+    const a = new TestClient(env.server, "Ann");
+    a.hello();
+    a.send({ type: "create_lobby", bot: true });
+    const bot = a.state().players.find((p) => p.bot)!;
+    assert.equal(bot.name, "Bot");
+    env.scheduler.advance(1000);
+    assert.equal(a.state().players.find((p) => p.bot)!.ready, true, "the bot readies itself");
+    a.send({ type: "ready" });
+    assert.equal(a.last("vote_phase").phase, "weapon");
+    a.send({ type: "vote_weapon", weapon: "WeaponDagger" });
+    env.scheduler.advance(1000);
+    a.send({ type: "vote_keepsake", keepsake: "KeepsakeB" });
+    env.scheduler.advance(1000);
+    a.send({ type: "ready" });
+    env.scheduler.advance(1000);
+    return { ...env, a, bot };
+  }
+
+  it("a bot follows your votes, readies, and reports a room every so often", () => {
+    const { a, scheduler } = raceTheBot();
+    const start = a.last("race_start");
+    assert.equal(start.weapon, "WeaponDagger", "the bot voted \"any\"");
+    assert.equal(start.keepsake, "KeepsakeB");
+    scheduler.advance(3000 + ROOM);
+    const p = a.last("opponent_progress");
+    assert.equal(p.name, "Bot");
+    assert.equal(p.depth, 1);
+    assert.equal(p.room, "F_Bot1", "an Erebus room on the rival plate");
+  });
+
+  it("you clear: the bot gives up and the race ends; you fall: the bot clears", () => {
+    const won = raceTheBot();
+    won.scheduler.advance(3000 + ROOM);
+    won.a.send({ type: "run_complete", victory: true, time: 80 });
+    won.scheduler.advance(1000);
+    assert.equal(won.a.last("race_result").you_won, true);
+    assert.equal(won.a.last("race_result").results.find((r) => r.name === "Bot")!.outcome, "forfeit");
+
+    const lost = raceTheBot();
+    lost.scheduler.advance(3000);
+    lost.a.send({ type: "run_complete", victory: false, time: 20 });
+    lost.scheduler.advance(3000);
+    assert.equal(lost.a.last("race_result").winner_name, "Bot");
+  });
+
+  it("asks for a rematch when you do", () => {
+    const { a, scheduler } = raceTheBot();
+    scheduler.advance(3000);
+    a.send({ type: "run_complete", victory: true, time: 80 });
+    scheduler.advance(1000);
+    a.send({ type: "rematch" });
+    scheduler.advance(1000);
+    assert.equal(a.state().phase, "voting_weapon");
+  });
+
+  it("joins private lobbies only, before the vote; numbered; not counted as online; gone with the last person", () => {
+    const { server, scheduler } = makeServer();
+    const a = new TestClient(server, "Ann");
+    const q = new TestClient(server, "Quinn");
+    a.hello();
+    q.hello();
+    q.send({ type: "find_match" });
+    q.send({ type: "add_bot" });
+    assert.equal(q.last("error").code, "not_private");
+    a.send({ type: "create_lobby" });
+    a.send({ type: "add_bot" });
+    a.send({ type: "add_bot" });
+    assert.deepEqual(a.state().players.map((p) => p.name), ["Ann", "Bot", "Bot 2"]);
+    scheduler.advance(1000);
+    assert.equal(a.last("presence").online, 2, "Ann and Quinn");
+    a.send({ type: "leave_lobby" });
+    assert.equal(server.lobbyCount, 1, "only Quinn's search is left");
+    scheduler.advance(10_000);
   });
 });

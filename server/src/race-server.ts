@@ -3,6 +3,7 @@
 // injectable clock/timer and RNG so tests can run it deterministically.
 
 import { randomBytes } from "node:crypto";
+import { BotBrain } from "./bot-brain.js";
 import { isQuickLine } from "./chat.js";
 import {
   NO_PREFERENCE,
@@ -57,10 +58,12 @@ export interface ServerOptions {
   idleLobbyMs: number;
   /** Oldest mod version accepted (default MIN_MOD_VERSION). */
   minModVersion?: string;
-  /** Racers per lobby (default 5). */
+  /** Racers per private lobby (default 5). */
   maxPlayers?: number;
-  /** Find Match: how long a lobby gathers racers after the second one arrives (default 15 s). */
-  matchGatherMs?: number;
+  /** Racers per Find Match lobby (default 2; more race together through a private lobby). */
+  matchPlayers?: number;
+  /** House bots (add_bot): seconds per room in the progress they report (default 75). */
+  botRoomSeconds?: number;
   /** Options per vote; a missing or empty pool skips that vote. */
   pools: Partial<Record<VotePhase, VoteOption[]>>;
   /** After the votes: time to set Arcana/aspect/familiar before the race starts anyway (default 120 s). */
@@ -81,6 +84,8 @@ function votePhaseOf(phase: LobbyPhase): VotePhase | null {
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const isLobbyCode = (code: string) => code.length === 4 && [...code].every((ch) => CODE_ALPHABET.includes(ch));
 const MAX_SEED = 2 ** 31 - 1;
+/** A house bot answers this long after a message, like a player would. */
+const BOT_DELAY_MS = 400;
 
 interface RunResult {
   outcome: Outcome;
@@ -113,13 +118,15 @@ class Lobby {
   phase: LobbyPhase = "waiting";
   /** players[0] is the host. */
   players: Session[] = [];
-  /** Made by Find Match: starts by itself once racers have gathered. */
+  /** Made by Find Match (two racers) rather than shared by its code. */
   isPublic = false;
-  gatherEndsAt: number | null = null;
+  /** A solo run: one racer, voting started at once. */
+  solo = false;
   votes: Record<VotePhase, Map<string, string>> = { route: new Map(), weapon: new Map(), keepsake: new Map() };
   selected: Record<VotePhase, string | null> = { route: null, weapon: null, keepsake: null };
   /** ready_check: when the race starts even if not everyone is ready. */
   prepEndsAt: number | null = null;
+  /** waiting: ready to vote; ready_check: ready for the start. */
   ready = new Set<string>();
   rematch = new Set<string>();
   race: RaceState | null = null;
@@ -130,7 +137,17 @@ class Lobby {
   constructor(
     readonly code: string,
     public lastActivity: number,
+    readonly maxPlayers: number,
   ) {}
+
+  /** Racers needed to vote, start and rematch: two, or one for a solo run. */
+  get minPlayers(): number {
+    return this.solo ? 1 : 2;
+  }
+
+  get enough(): boolean {
+    return this.players.length >= this.minPlayers;
+  }
 
   others(s: Session): Session[] {
     return this.players.filter((p) => p !== s);
@@ -171,6 +188,8 @@ export class Session {
   graceTimer: unknown = null;
   versions: ClientVersions = { mod: null, gameBuild: null };
   lastChat = -Infinity;
+  /** A house bot's brain (add_bot): it has no transport and never reconnects. */
+  bot: BotBrain | null = null;
 
   constructor(readonly id: string) {}
 
@@ -233,7 +252,7 @@ export class RaceServer {
       case "ping":
         return s.send({ type: "pong", t: msg.t ?? null, server_time: this.opts.scheduler.now() });
       case "create_lobby":
-        return this.onCreate(s);
+        return this.onCreate(s, undefined, { solo: msg.solo === true, bot: msg.bot === true });
       case "find_match":
         return this.onFindMatch(s);
       case "cancel_match":
@@ -249,7 +268,7 @@ export class RaceServer {
       case "vote_keepsake":
         return this.onVote(s, "keepsake", msg.keepsake);
       case "ready":
-        return this.onReady(s);
+        return this.onReady(s, msg.ready !== false);
       case "progress_update": {
         const { type: _t, ...progress } = msg;
         return this.onProgress(s, progress);
@@ -264,8 +283,8 @@ export class RaceServer {
         return this.onForfeit(s, "forfeit", msg.stats, msg.build);
       case "rematch":
         return this.onRematch(s);
-      case "start_race":
-        return this.onStartRace(s);
+      case "add_bot":
+        return this.onAddBot(s);
     }
   }
 
@@ -379,7 +398,7 @@ export class RaceServer {
     let searching = 0;
     let racing = 0;
     for (const s of this.sessions.values()) {
-      if (!s.greeted || !s.connected) continue;
+      if (!s.greeted || !s.connected || s.bot) continue;
       online++;
       const lobby = s.lobby;
       if (!lobby) continue;
@@ -401,7 +420,7 @@ export class RaceServer {
       const key = `${p.online}/${p.searching}/${p.racing}`;
       if (key === this.lastPresence) return;
       this.lastPresence = key;
-      for (const s of this.sessions.values()) if (s.greeted) s.send({ type: "presence", ...p });
+      for (const s of this.sessions.values()) if (s.greeted && !s.bot) s.send({ type: "presence", ...p });
     }, 1000);
   }
 
@@ -453,26 +472,28 @@ export class RaceServer {
     throw new Error("no free lobby codes");
   }
 
-  private onCreate(s: Session, code = this.newCode()): void {
+  private onCreate(s: Session, code = this.newCode(), how: { solo?: boolean; bot?: boolean } = {}): void {
     if (this.warnIfOutdated(s)) return;
     if (s.lobby) this.removeFromLobby(s, "forfeit");
-    const lobby = new Lobby(code, this.opts.scheduler.now());
+    const lobby = new Lobby(code, this.opts.scheduler.now(), how.solo ? 1 : this.maxPlayers);
+    lobby.solo = how.solo === true;
     this.lobbies.set(lobby.code, lobby);
-    this.log(`lobby ${lobby.code} created by ${s.id}`);
+    this.log(`lobby ${lobby.code} created by ${s.id}${lobby.solo ? " (solo)" : ""}`);
     this.addToLobby(s, lobby);
     s.send({ type: "lobby_created", code: lobby.code });
+    if (lobby.solo) this.startVoting(lobby);
+    else if (how.bot) this.addBot(lobby);
   }
 
   /**
-   * Find Match: join an open Find Match lobby whose racers can all race us, or
-   * open one. It starts voting by itself matchGatherMs after the second racer
-   * arrives, or at once when full.
+   * Find Match: join an open Find Match lobby whose racer can race us, or open
+   * one. Voting starts once both racers are ready.
    */
   private onFindMatch(s: Session): void {
     if (this.warnIfOutdated(s)) return;
     if (s.lobby) return this.error(s, "already_in_lobby", "Leave your lobby first");
     const open = [...this.lobbies.values()].filter(
-      (l) => l.isPublic && l.phase === "waiting" && l.players.length < this.maxPlayers,
+      (l) => l.isPublic && l.phase === "waiting" && l.players.length < l.maxPlayers,
     );
     const fit = open.find((l) => l.players.every((p) => !compatibility(s.versions, p.versions)));
     if (fit) {
@@ -487,7 +508,7 @@ export class RaceServer {
         break;
       }
     }
-    const lobby = new Lobby(this.newCode(), this.opts.scheduler.now());
+    const lobby = new Lobby(this.newCode(), this.opts.scheduler.now(), this.opts.matchPlayers ?? 2);
     lobby.isPublic = true;
     this.lobbies.set(lobby.code, lobby);
     this.log(`queue ${s.id} opens ${lobby.code}`);
@@ -512,7 +533,7 @@ export class RaceServer {
     }
     if (!lobby) return this.error(s, "lobby_not_found", `Lobby ${code} not found`);
     if (lobby === s.lobby) return this.error(s, "already_in_lobby", "Already in this lobby");
-    if (lobby.players.length >= this.maxPlayers) return this.error(s, "lobby_full", `Lobby ${code} is full`);
+    if (lobby.players.length >= lobby.maxPlayers) return this.error(s, "lobby_full", `Lobby ${code} is full`);
     if (lobby.phase !== "waiting") return this.error(s, "lobby_busy", `Lobby ${code} is already racing; try again after this race`);
     for (const p of lobby.players) {
       const m = compatibility(s.versions, p.versions);
@@ -526,42 +547,52 @@ export class RaceServer {
     lobby.players.push(s);
     s.lobby = lobby;
     lobby.lastActivity = this.opts.scheduler.now();
-    this.log(`lobby ${lobby.code} joined by ${s.id} (${lobby.players.length}/${this.maxPlayers})`);
+    this.log(`lobby ${lobby.code} joined by ${s.id} (${lobby.players.length}/${lobby.maxPlayers})`);
     for (const p of lobby.players) {
       p.send({ type: "lobby_joined", code: lobby.code, opponent: lobby.others(p)[0]?.name ?? null });
     }
-    if (lobby.isPublic) this.gather(lobby);
     this.broadcastState(lobby);
   }
 
-  /** Find Match lobbies: start once full, or after the gather window with two or more. */
-  private gather(lobby: Lobby): void {
-    if (lobby.phase !== "waiting") return;
-    if (lobby.players.length >= this.maxPlayers) return this.startVoting(lobby);
-    if (lobby.players.length < 2) {
-      if (lobby.timer !== null) this.opts.scheduler.clearTimeout(lobby.timer);
-      lobby.timer = null;
-      lobby.gatherEndsAt = null;
-      return;
-    }
-    if (lobby.timer !== null) return;
-    const ms = this.opts.matchGatherMs ?? 15_000;
-    lobby.gatherEndsAt = this.opts.scheduler.now() + ms;
-    lobby.timer = this.opts.scheduler.setTimeout(() => {
-      lobby.timer = null;
-      lobby.gatherEndsAt = null;
-      if (lobby.phase === "waiting" && lobby.players.length >= 2) this.startVoting(lobby);
-    }, ms);
+  /** A private lobby still waiting: a house bot joins it. */
+  private onAddBot(s: Session): void {
+    const lobby = s.lobby;
+    if (!lobby || lobby.phase !== "waiting") return this.error(s, "not_waiting", "Bots join a race before the vote");
+    if (lobby.isPublic || lobby.solo) return this.error(s, "not_private", "Bots only join private races");
+    if (lobby.players.length >= lobby.maxPlayers) return this.error(s, "lobby_full", `Lobby ${lobby.code} is full`);
+    this.addBot(lobby);
   }
 
-  /** Host of a lobby: start the race setup with whoever has joined. */
-  private onStartRace(s: Session): void {
-    const lobby = s.lobby;
-    if (!lobby || lobby.phase !== "waiting") return this.error(s, "not_waiting", "Nothing to start");
-    if (lobby.host !== s) return this.error(s, "not_host", `Only ${lobby.host?.name ?? "the host"} can start the race`);
-    if (lobby.players.length < 2) return this.error(s, "need_players", "Wait for at least one more racer");
-    this.log(`lobby ${lobby.code} started by host ${s.id} with ${lobby.players.length}`);
-    this.startVoting(lobby);
+  /**
+   * A house bot: a session without a transport whose brain follows the others'
+   * votes, readies, reports a room every botRoomSeconds and never clears first.
+   * Its messages arrive a moment later, like a player's, never inside the
+   * server's own loops.
+   */
+  private addBot(lobby: Lobby): void {
+    const n = lobby.players.filter((p) => p.bot).length + 1;
+    const scheduler = this.opts.scheduler;
+    let conn: Connection | null = null;
+    const brain = new BotBrain(
+      { follow: true, outcome: "none", finishAfter: 0, progressEvery: this.opts.botRoomSeconds ?? 75, rematch: true },
+      (m) => scheduler.setTimeout(() => { if (conn && conn.session.lobby) conn.receive(m); }, BOT_DELAY_MS),
+      scheduler,
+    );
+    conn = this.connect((m) => brain.handle(m));
+    const bot = conn.session;
+    bot.name = n === 1 ? "Bot" : `Bot ${n}`;
+    bot.greeted = true;
+    bot.bot = brain;
+    this.log(`bot ${bot.id} for lobby ${lobby.code}`);
+    this.addToLobby(bot, lobby);
+  }
+
+  /** Waiting: everyone in the lobby (two or more) is ready, so the vote starts. */
+  private maybeStartVoting(lobby: Lobby): void {
+    if (lobby.phase === "waiting" && lobby.enough && lobby.players.every((p) => lobby.ready.has(p.id))) {
+      this.log(`lobby ${lobby.code} everyone ready with ${lobby.players.length}; voting`);
+      this.startVoting(lobby);
+    }
   }
 
   private onLeave(s: Session): void {
@@ -585,6 +616,15 @@ export class RaceServer {
       s.graceTimer = null;
     }
     this.log(`lobby ${lobby.code} left by ${s.id}`);
+    if (s.bot) this.dropBot(s);
+    if (lobby.players.every((p) => p.bot)) {
+      // Only bots left: they go too.
+      for (const b of lobby.players) {
+        b.lobby = null;
+        this.dropBot(b);
+      }
+      lobby.players = [];
+    }
     if (lobby.players.length === 0) {
       this.closeLobby(lobby);
       return;
@@ -594,8 +634,14 @@ export class RaceServer {
       this.broadcastState(lobby);
       return;
     }
+    if (lobby.phase === "waiting") {
+      // The others stay ready; they may have been waiting only on the leaver.
+      this.broadcastState(lobby);
+      this.maybeStartVoting(lobby);
+      return;
+    }
     const voting = votePhaseOf(lobby.phase);
-    if (lobby.players.length >= 2 && (voting || lobby.phase === "ready_check" || lobby.phase === "finished")) {
+    if (lobby.enough && (voting || lobby.phase === "ready_check" || lobby.phase === "finished")) {
       // Enough racers left: carry on (the leaver may have been the last one we waited for).
       this.broadcastState(lobby);
       if (voting) this.maybeResolveVote(lobby, voting);
@@ -603,16 +649,21 @@ export class RaceServer {
       else this.maybeRematch(lobby);
       return;
     }
-    // Back to waiting for more racers.
+    // Back to waiting for more racers (and everyone readying again).
     this.clearTimers(lobby);
     lobby.phase = "waiting";
-    lobby.gatherEndsAt = null;
     lobby.prepEndsAt = null;
     lobby.race = null;
     lobby.ready.clear();
     lobby.rematch.clear();
-    if (lobby.isPublic) this.gather(lobby);
     this.broadcastState(lobby);
+  }
+
+  /** A house bot leaves for good: its timers stop and its session goes. */
+  private dropBot(b: Session): void {
+    b.bot?.stop();
+    b.conn = null;
+    this.forget(b);
   }
 
   private closeLobby(lobby: Lobby): void {
@@ -636,6 +687,10 @@ export class RaceServer {
       if (lobby.phase === "racing") continue;
       for (const p of lobby.players) {
         p.lobby = null;
+        if (p.bot) {
+          this.dropBot(p);
+          continue;
+        }
         p.send({ type: "error", code: "lobby_expired", message: `Lobby ${lobby.code} expired` });
         p.send({ type: "lobby_left" });
         if (!p.connected) this.forget(p);
@@ -659,6 +714,7 @@ export class RaceServer {
           ready: lobby.ready.has(q.id),
           host: i === 0,
           rematch: lobby.rematch.has(q.id),
+          bot: q.bot !== null,
         })),
         race: lobby.race
           ? {
@@ -670,9 +726,8 @@ export class RaceServer {
             }
           : null,
         public: lobby.isPublic,
-        max_players: this.maxPlayers,
-        starts_in:
-          lobby.gatherEndsAt !== null ? Math.max(0, Math.ceil((lobby.gatherEndsAt - this.opts.scheduler.now()) / 1000)) : null,
+        solo: lobby.solo,
+        max_players: lobby.maxPlayers,
         prep_ends_in:
           lobby.prepEndsAt !== null ? Math.max(0, Math.ceil((lobby.prepEndsAt - this.opts.scheduler.now()) / 1000)) : null,
       });
@@ -688,7 +743,6 @@ export class RaceServer {
   private startVoting(lobby: Lobby): void {
     if (lobby.timer !== null) this.opts.scheduler.clearTimeout(lobby.timer);
     lobby.timer = null;
-    lobby.gatherEndsAt = null;
     lobby.prepEndsAt = null;
     for (const phase of VOTE_ORDER) {
       lobby.votes[phase].clear();
@@ -732,7 +786,7 @@ export class RaceServer {
   }
 
   private maybeResolveVote(lobby: Lobby, phase: VotePhase): void {
-    if (lobby.players.length >= 2 && lobby.players.every((p) => lobby.votes[phase].has(p.id))) {
+    if (lobby.enough && lobby.players.every((p) => lobby.votes[phase].has(p.id))) {
       if (lobby.timer !== null) this.opts.scheduler.clearTimeout(lobby.timer);
       lobby.timer = null;
       this.resolveVote(lobby, phase);
@@ -786,23 +840,32 @@ export class RaceServer {
     lobby.prepEndsAt = this.opts.scheduler.now() + prepMs;
     lobby.timer = this.opts.scheduler.setTimeout(() => {
       lobby.timer = null;
-      if (lobby.phase !== "ready_check" || lobby.players.length < 2) return;
+      if (lobby.phase !== "ready_check" || !lobby.enough) return;
       this.log(`lobby ${lobby.code} prep time over; starting`);
       this.startCountdown(lobby);
     }, prepMs);
     this.broadcastState(lobby);
   }
 
-  private onReady(s: Session): void {
+  /** waiting: ready to vote (or not any more); ready_check: ready for the start. */
+  private onReady(s: Session, ready: boolean): void {
     const lobby = s.lobby;
+    if (lobby && lobby.phase === "waiting") {
+      if (ready) lobby.ready.add(s.id);
+      else lobby.ready.delete(s.id);
+      this.log(`lobby ${lobby.code} ${s.id} ${ready ? "ready" : "not ready"} to vote`);
+      this.broadcastState(lobby);
+      return this.maybeStartVoting(lobby);
+    }
     if (!lobby || lobby.phase !== "ready_check") return this.error(s, "not_ready_check", "Nothing to ready for");
+    if (!ready) return;
     lobby.ready.add(s.id);
     this.broadcastState(lobby);
     this.maybeStartCountdown(lobby);
   }
 
   private maybeStartCountdown(lobby: Lobby): void {
-    if (lobby.players.length >= 2 && lobby.players.every((p) => lobby.ready.has(p.id))) this.startCountdown(lobby);
+    if (lobby.enough && lobby.players.every((p) => lobby.ready.has(p.id))) this.startCountdown(lobby);
   }
 
   // ---------------------------------------------------------------- race
@@ -1036,7 +1099,7 @@ export class RaceServer {
 
   /** Everyone still here (two or more) asked for a rematch. */
   private maybeRematch(lobby: Lobby): void {
-    if (lobby.phase === "finished" && lobby.players.length >= 2 && lobby.players.every((p) => lobby.rematch.has(p.id))) {
+    if (lobby.phase === "finished" && lobby.enough && lobby.players.every((p) => lobby.rematch.has(p.id))) {
       this.startVoting(lobby);
     }
   }

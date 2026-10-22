@@ -5,7 +5,8 @@
 # Only pad presses move the lobby forward: the in-game bot is hands-off
 # (role "pad") until the race starts, then plays the run as usual.
 #
-# Script: home -> A (Find Match, focused) ; weapon vote -> Right Right A
+# Script: home -> A (Find Match, focused) ; rival found -> A (Ready to Vote,
+# focused) ; weapon vote -> Right Right A
 # (third weapon: proves D-pad navigation) ; keepsake vote -> Down A ;
 # ready check -> A. Logs: local/runs/<stamp>-pad/. Prints RESULT: PASS|FAIL.
 # PAD_SCENARIO=forfeit: after the rooms, Start -> Down Down A ("Race Menu"
@@ -81,6 +82,8 @@ wait_page home 240
 # D-pad Up (nothing above Find Match, so the focus stays there).
 pad up
 sleep 1.5
+pad a
+wait_page "waiting:public:2:false"
 pad a
 wait_page vote_weapon
 pad right right a
