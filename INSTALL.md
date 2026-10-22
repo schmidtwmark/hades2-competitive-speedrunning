@@ -119,6 +119,9 @@ back the `d3d12.dll` that was there before).
 - **Normal play** still works with the mod installed; one visible change is that
   the pause menu's "Undo Night" reads "Forfeit Race" (outside a race it still
   undoes the night as usual).
+- **A Hell2Modding window over the game** (dark panels, a menu bar at the top) takes
+  all input while it is open. Press **B** on a controller or **Insert** on a keyboard
+  to close it.
 - **Game updates** can move the code the mod hooks into. If that happens the
   title-screen entry or pause-menu forfeit disappears instead of breaking the
   game; update the mod when a new version is out. Tested with Hades II Steam

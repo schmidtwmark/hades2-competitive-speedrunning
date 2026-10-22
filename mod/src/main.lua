@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.5.3'
+local VERSION = '0.5.4'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -221,6 +221,32 @@ local function competitive_arrival()
 	if client.state.conn == 'disconnected' and not client.want_connected then client:connect() end
 end
 
+-- F8 shows the debug window, through the game's own keybinds: a real key
+-- press only. (Polling ImGui for F8 fired by itself on arriving in the
+-- Crossroads and opened Hell2Modding's overlay on controller players.)
+local function show_window()
+	ui.visible = true
+	-- Text boxes only get keyboard focus while the H2M overlay is open.
+	if not rom.gui.is_open() then rom.gui.toggle() end
+end
+if rom.inputs and rom.inputs.on_key_pressed then
+	rom.inputs.on_key_pressed{ 'F8', Name = 'Ranked Race window', show_window }
+end
+
+-- Hell2Modding's overlay takes all game input while it is open and only its
+-- key (Insert) closes it, so B (the game's Cancel control, which still reads
+-- the pad then; ImGui doesn't see it) closes it too.
+local cancel_was_down = false
+local function pad_close_pressed()
+	local is_down = rom.game.IsControlDown
+	if not is_down then return nil end
+	local ok, down = pcall(is_down, { Name = 'Cancel' })
+	down = ok and down == true
+	local pressed = down and not cancel_was_down
+	cancel_was_down = down
+	return pressed and 'control Cancel' or nil
+end
+
 local function frame()
 	-- show_ui = "lobby": like a player, keep the lobby window open until the race
 	-- starts, then close the overlay so only the in-run HUD shows.
@@ -228,10 +254,10 @@ local function frame()
 		local want_open = ui.visible and not (bot.cfg.show_ui == 'lobby' and client:racing())
 		if want_open ~= rom.gui.is_open() then rom.gui.toggle() end
 	end
-	if rom.ImGui.IsKeyPressed(rom.ImGuiKey.F8, false) then
-		ui:toggle()
-		-- Text boxes only get keyboard focus while the H2M overlay is open.
-		if ui.visible and not rom.gui.is_open() then rom.gui.toggle() end
+	local by_pad = pad_close_pressed()
+	if by_pad and rom.gui.is_open() then
+		log('overlay: closed by the controller (' .. by_pad .. ')')
+		rom.gui.toggle()
 	end
 	competitive_arrival()
 	client:update()
@@ -261,6 +287,7 @@ rom.gui.add_always_draw_imgui(guarded(frame))
 rom.gui.add_imgui(guarded(function() ui:draw_window() end))
 rom.gui.add_to_menu_bar(function()
 	if rom.ImGui.MenuItem('Ranked Race (F8)') then ui:toggle() end
+	if rom.ImGui.MenuItem('Close (B on a controller)') then rom.gui.toggle() end
 end)
 
 log('loaded; bot=' .. tostring(bot.active))

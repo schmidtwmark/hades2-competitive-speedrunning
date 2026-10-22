@@ -219,7 +219,14 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
 - **Welcome** (first board open, and the home page's About): spoiler warning for the 100%-completed
   profile first, what the mod does, the AI disclosure and the repository link; remembered in
   `plugins_data/.../welcome-seen`. Hell2Modding's own first-launch window is skipped by the installers
-  (`config/Hell2Modding-Hell2Modding-GUI.cfg`: `onboarded = true`). (Lua `update()` stops while the game is paused; the ImGui
+  (`config/Hell2Modding-Hell2Modding-GUI.cfg`: `onboarded = true`).
+  Hell2Modding's overlay (Insert) blocks `PlayerHandleInput` while open, so a controller can't touch the
+  game or close it. Twice (10-20, 10-22) it opened by itself in the frame the competitive Crossroads
+  loaded: a Lua `rom.gui.toggle()` (no "Toggled Modding GUI" line, which only the Insert path logs), and
+  the only caller on a player's install was the F8 debug-window check `ImGui.IsKeyPressed(ImGuiKey.F8)`.
+  Since 0.5.4 F8 goes through `rom.inputs.on_key_pressed` (real key presses only) and B closes the
+  overlay: `IsControlDown({Name="Cancel"})` still reads the pad while the overlay blocks input; ImGui's
+  gamepad keys don't (Back does nothing). Gate: `scripts/e2e-overlay-pad.sh` (virtual pad, B). (Lua `update()` stops while the game is paused; the ImGui
   frame callback doesn't, so the paused racer keeps reporting.)
 - **Chat** (`chatfeed.lua`, board pages, server `chat`): quick lines and an on-screen keyboard on the
   Race Board (lobby, prep, results) and, mid-run, from the pause menu's "Race Menu" (the relabelled

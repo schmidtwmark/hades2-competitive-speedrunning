@@ -26,6 +26,8 @@
 --   shadow_scale  override the shadow's scale (size checks)
 --   probe_prep    during the prep time, check the Crossroads set-up before readying
 --                 (race loadout in hand, Arcana screen, aspect swap, locked racks)
+--   probe_overlay in the competitive Crossroads, open Hell2Modding's overlay and wait for
+--                 a controller press to close it (scripts/e2e-overlay-pad.sh)
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
 
@@ -197,6 +199,7 @@ function Bot:update()
 		return self:finish(false, 'timeout in step ' .. self.step)
 	end
 	local c, st = self.client, self.client.state
+	if self.cfg.probe_overlay then return self:probe_overlay(now) end
 	if self.step == 'idle' then return end
 	if self.game.bot_advance_dialogue then self.game:bot_advance_dialogue() end
 	if self.game.bot_wake_death_loop and self.cfg.role ~= 'pad' then self.game:bot_wake_death_loop() end
@@ -204,6 +207,30 @@ function Bot:update()
 	self:pump_presses(now)
 	local handler = self['step_' .. self.step]
 	if handler then handler(self, now, c, st) end
+end
+
+-- probe_overlay: settle in the competitive Crossroads, open Hell2Modding's
+-- overlay (as the stray F8 did) and wait for a controller press to close it.
+function Bot:probe_overlay(now)
+	local game, gui = self.game, self.game.rom.gui
+	local p = self.overlay_probe
+	if not p then
+		if not (game:competitive_active() and game:in_hub()) then return end
+		p = { at = now + 8 }
+		self.overlay_probe = p
+	end
+	if now < p.at then return end
+	if not p.opened then
+		p.opened = now
+		if not gui.is_open() then gui.toggle() end
+		self.log('bot: overlay opened; waiting for the controller')
+	elseif not gui.is_open() then
+		self:check('overlay closed by the controller', true, string.format('%.1f s', now - p.opened))
+		self:finish(true, 'overlay closed')
+	elseif now - p.opened > (self.cfg.overlay_wait or 60) then
+		self:check('overlay closed by the controller', false, 'still open')
+		self:finish(false, 'overlay stayed open')
+	end
 end
 
 function Bot:step_connect(now, c, st)
