@@ -92,7 +92,7 @@ describe("tcp transport + mock clients", () => {
     sock.write('lo","name":"X"}\n{not json}\n{"type":"ping","t":7}\n');
     await new Promise((r) => setTimeout(r, 100));
     sock.end();
-    const msgs = lines.map((l) => JSON.parse(l));
+    const msgs = lines.map((l) => JSON.parse(l)).filter((m) => m.type !== "presence");
     assert.deepEqual(
       msgs.map((m) => m.type),
       ["welcome", "error", "pong"],

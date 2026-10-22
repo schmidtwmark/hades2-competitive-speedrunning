@@ -34,7 +34,8 @@ local CLOCK_Y = 34
 local CLOCK_CELLS = 9       -- up to "180:00.00" (the race time limit)
 local CLOCK_DIGIT_W = 23
 local CLOCK_PUNCT_W = 11
-local TOP = 92            -- rival plate, under the race clock
+local SPLIT_Y = 70        -- the latest region split, under the race clock
+local TOP = 104           -- rival plate, under the split
 local BAR_SCALE = 0.32    -- HPBarFill is the player's bar, ~1050 px wide at 1.0
 local BAR_WIDTH = 1050 * BAR_SCALE
 local SMALL_BAR_SCALE = 0.2
@@ -452,6 +453,43 @@ function Hud:update_prep()
 	for i, row in ipairs(view.rows) do show(i, panel.rows[i], row.text, row.color) end
 end
 
+-- The latest region split under the clock: "Erebus  5:12.30  -0:05.31",
+-- green ahead of the PB's split, red behind, white without a PB.
+function Hud:update_split()
+	local G, ms = self.G, self.G.MapState
+	local race = self.game.race
+	local last = race and race.splits and race.splits.last
+	if not last then return end
+	local fmt_delta = self.game.Splits and self.game.Splits.fmt_delta
+	local text = last.name .. '  ' .. fmt_time(last.time)
+	local color = WHITE
+	if last.delta and fmt_delta then
+		text = text .. '  ' .. fmt_delta(last.delta)
+		color = last.delta < 0 and GREEN or RED
+	end
+	if not ms.RankedRaceSplit then
+		local id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = CLOCK_GROUP, X = (G.ScreenWidth or 1920) - MARGIN,
+			Y = SPLIT_Y })
+		local a = text_args(id, 'P22UndergroundSCMedium', 20, 'Right', color)
+		a.DataProperties = nil
+		G.CreateTextBox(a)
+		ms.RankedRaceSplit = { id = id }
+	end
+	local split = ms.RankedRaceSplit
+	if split.text ~= text then
+		split.text = text
+		self:set(split.id, text, color)
+	end
+end
+
+function Hud:destroy_split()
+	local ms = self.G.MapState
+	if ms and ms.RankedRaceSplit then
+		pcall(self.G.Destroy, { Id = ms.RankedRaceSplit.id })
+		ms.RankedRaceSplit = nil
+	end
+end
+
 function Hud:update()
 	if self.disabled or not self.G.MapState then return end
 	if not self.prep_failed then
@@ -464,10 +502,13 @@ function Hud:update()
 	if not self:wanted() then
 		self:destroy()
 		self:destroy_clock()
+		self:destroy_split()
 		return
 	end
 	local cok, cerr = pcall(self.update_clock, self)
 	if not cok then return self:fail('drawing the race clock', cerr) end
+	local sok, serr = pcall(self.update_split, self)
+	if not sok then return self:fail('drawing the split', serr) end
 	local p = self:plate()
 	if not p then
 		local ok, err = pcall(self.create, self)

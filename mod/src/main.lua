@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.5.5'
+local VERSION = '0.5.6'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -29,6 +29,7 @@ local Bot = import('bot.lua')
 local Competitive = import('competitive.lua')
 local Profile = import('profile.lua')
 local SaveFile = import('savefile.lua')
+local Splits = import('splits.lua')
 local Shadow = import('shadow.lua')
 local Hud = import('hud.lua')
 local Board = import('board.lua')
@@ -91,7 +92,8 @@ end
 
 -- wiring ------------------------------------------------------------------------
 
-local game = Game.new({ rom = rom, modutil = rom.mods['SGG_Modding-ModUtil'], log = log, now = socket.gettime, profile = Profile })
+local game = Game.new({ rom = rom, modutil = rom.mods['SGG_Modding-ModUtil'], log = log, now = socket.gettime, profile = Profile,
+	splits = Splits })
 -- The racer's competitive loadout (Arcana, familiar, aspects) across sessions.
 local loadout_path = data_dir .. '/loadout.json'
 do
@@ -113,6 +115,25 @@ game.save_loadout = function(loadout)
 		f:close()
 		loadout_written = text
 	end
+end
+-- Personal bests per route: the region splits of the fastest cleared race run.
+local pb_path = data_dir .. '/pb.json'
+do
+	local f = io.open(pb_path, 'r')
+	if f then
+		local ok, saved = pcall(json.decode, f:read('*a'))
+		f:close()
+		if ok and type(saved) == 'table' then game.pbs = saved end
+	end
+end
+game.save_pb = function(route, record)
+	game.pbs[route] = record
+	local f = io.open(pb_path, 'w')
+	if f then
+		f:write(json.encode(game.pbs))
+		f:close()
+	end
+	log('pb: new personal best on ' .. tostring(route) .. ': ' .. string.format('%.2f', record.total))
 end
 -- Save file 1, read-only: the racer's own Arcana layouts, familiar and aspects
 -- until they change them in competitive mode. (Proton's user profile too.)

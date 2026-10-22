@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { QUICK_LINES } from "../src/chat.js";
 import { TEST_KEEPSAKES, TEST_WEAPONS, TestClient, group, makeServer, pair, racing, racingGroup } from "./helpers.js";
 
 describe("session", () => {
@@ -762,17 +764,59 @@ describe("route vote and prep time", () => {
   });
 });
 
+describe("presence", () => {
+  it("tells racers how many are online, searching and racing, once a second at most", () => {
+    const { server, scheduler } = makeServer();
+    const a = new TestClient(server, "Ann");
+    a.hello();
+    assert.deepEqual(a.last("presence"), { type: "presence", online: 1, searching: 0, racing: 0 }, "on hello");
+    const b = new TestClient(server, "Bob");
+    b.hello();
+    a.send({ type: "find_match" });
+    scheduler.advance(1000);
+    assert.deepEqual(b.last("presence"), { type: "presence", online: 2, searching: 1, racing: 0 });
+    const sent = b.all("presence").length;
+    scheduler.advance(5000);
+    assert.equal(b.all("presence").length, sent, "nothing new: nothing sent");
+    b.send({ type: "find_match" }); // pairs with Ann; the setup starts later
+    scheduler.advance(1000);
+    assert.equal(a.last("presence").searching, 2);
+    b.conn.close();
+    scheduler.advance(1000);
+    assert.equal(a.last("presence").online, 1, "a closed connection is offline");
+  });
+});
+
 describe("chat", () => {
   it("goes to everyone in the lobby with the sender's name, at most one line a second", () => {
     const { cs, scheduler } = group(3);
     const [a, b, c] = cs as [TestClient, TestClient, TestClient];
-    b.send({ type: "chat", text: "  good   luck\n all " });
-    for (const x of cs) assert.deepEqual(x.last("chat"), { type: "chat", text: "good luck all", id: b.last("chat").id, name: "Bob" });
-    b.send({ type: "chat", text: "spam" });
+    b.send({ type: "chat", text: "  Good   luck!\n " });
+    for (const x of cs) assert.deepEqual(x.last("chat"), { type: "chat", text: "Good luck!", id: b.last("chat").id, name: "Bob" });
+    b.send({ type: "chat", text: "Nice!" });
     assert.equal(c.all("chat").length, 1, "too soon: dropped");
     scheduler.advance(1000);
     b.send({ type: "chat", text: "GG" });
     assert.equal(a.last("chat").text, "GG");
+  });
+
+  it("relays only the quick lines: no free text", () => {
+    const { cs, scheduler } = group(2);
+    const [a, b] = cs as [TestClient, TestClient];
+    a.send({ type: "chat", text: "you are bad" });
+    assert.equal(a.last("error").code, "chat_not_allowed");
+    assert.equal(b.all("chat").length, 0, "nothing relayed");
+    scheduler.advance(1000);
+    a.send({ type: "chat", text: "gg" });
+    assert.equal(b.all("chat").length, 0, "exact lines only");
+  });
+
+  it("keeps the server's quick lines equal to the Race Board's", () => {
+    const lua = readFileSync(new URL("../../../mod/src/board.lua", import.meta.url), "utf8");
+    const block = lua.match(/Board\.QUICK_LINES = \{([^}]*)\}/);
+    assert.ok(block, "Board.QUICK_LINES in board.lua");
+    const lines = [...block![1]!.matchAll(/'([^']*)'|"([^"]*)"/g)].map((m) => m[1] ?? m[2]);
+    assert.deepEqual(lines, [...QUICK_LINES]);
   });
 
   it("refuses empty or long lines and racers outside a lobby", () => {

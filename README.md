@@ -4,8 +4,8 @@ A race mod for Hades II for two to five players. Racers meet on the in-game
 Race Board, vote on the route (Underworld, Surface or Dream Dive), a weapon and a keepsake,
 get two minutes to set Arcana, aspect and familiar, and start the same seeded
 run at the same moment. Every racer is offered the same rooms, foes, rewards,
-gods, boons and shop stock as far as their build allows. Quick-chat lines and an
-on-screen keyboard work from the board and the pause menu. During the run you see each rival as a translucent shadow
+gods, boons and shop stock as far as their build allows. Quick-chat lines (no free
+text) work from the board and the pause menu. During the run you see each rival as a translucent shadow
 Melinoë (one colour per rival, attacking and dashing as they do) whenever you
 are in the same room, plus a rival
 plate (top right) with their biome and depth, how far ahead or behind you they

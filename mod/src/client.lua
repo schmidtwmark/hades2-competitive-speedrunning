@@ -384,6 +384,11 @@ function handlers.pong(c, m)
 	if type(m.t) == 'number' then c.state.latency = c.now() - m.t end
 end
 
+-- How many racers are online, in Find Match and racing (0.5.6 servers).
+function handlers.presence(c, m)
+	c.state.presence = { online = m.online, searching = m.searching, racing = m.racing }
+end
+
 function handlers.lobby_created(c, m)
 	c:_emit('lobby_created', m.code)
 end

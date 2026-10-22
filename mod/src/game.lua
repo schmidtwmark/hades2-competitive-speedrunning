@@ -59,6 +59,8 @@ function Game.new(deps)
 	g.log = deps.log
 	g.now = deps.now
 	g.profile = deps.profile
+	g.Splits = deps.splits
+	g.pbs = {}            -- route -> personal best (splits.lua), from main.lua's pb.json
 	g.client = nil
 	g.race = nil          -- race whose run is (or was) live: { race, run, rooms = {} }
 	g.launching = nil     -- race being launched (between GO and StartNewRun)
@@ -816,7 +818,8 @@ function Game:hook_StartNewRun(base, prevRun, args)
 		self.launching = nil
 		pcall(self.apply_seed, self, race.seed)
 		self.race = { race = race, run = self.G.CurrentRun, rooms = {}, finished = false,
-			base_rerolls = self.G.CurrentRun and self.G.CurrentRun.NumRerolls }
+			base_rerolls = self.G.CurrentRun and self.G.CurrentRun.NumRerolls,
+			splits = self.Splits and self.Splits.new(race.route, self.pbs[race.route]) }
 		self.dream_biomes = 0
 		self.log('game: race run created for race ' .. tostring(race.race_id))
 		if self.racelog then
@@ -879,6 +882,35 @@ function Game:on_room_start(run, room)
 	self.log(string.format('game: room %d %s biome=%s seed=%s encounter=%s reward=%s', entry.depth, tostring(entry.name),
 		tostring(entry.biome), tostring(entry.seed), tostring(entry.encounter), tostring(entry.reward)))
 	if self.client then self.client:report_progress(self:progress(), true) end
+	local sp = self.race.splits and self.client and self.race.splits:room(entry.name, self.client:race_time())
+	if sp then
+		self.log(string.format('game: split %d %s %.2f delta=%s', sp.index, sp.name, sp.time, tostring(sp.delta)))
+		self:rlog('split', { index = sp.index, name = sp.name, time = sp.time, delta = sp.delta })
+	end
+end
+
+-- The run is cleared: the last split, the PB kept if this beat it, and a line
+-- for the results page.
+function Game:finish_splits()
+	local sp = self.race and self.race.splits
+	if not (sp and self.client and not sp.cleared) then return end
+	local last = sp:clear(self.client:race_time())
+	self.log(string.format('game: split %d %s %.2f (cleared) new_pb=%s', last.index, last.name, last.time, tostring(last.new_pb)))
+	self:rlog('split', { index = last.index, name = last.name, time = last.time, delta = last.delta, new_pb = last.new_pb })
+	local record = sp:pb_record()
+	if record and self.save_pb then
+		local ok, err = pcall(self.save_pb, self.race.race.route, record)
+		if not ok then self.log('game: saving the PB failed: ' .. tostring(err)) end
+	end
+	local line
+	if last.new_pb and last.total_delta then
+		line = 'New personal best! ' .. self.Splits.fmt_delta(last.total_delta) .. ' on your old one'
+	elseif last.new_pb then
+		line = 'Your first clear on this route: that is your personal best'
+	else
+		line = 'This run: ' .. self.Splits.fmt_delta(last.total_delta) .. ' on your personal best'
+	end
+	if self.board and self.board.ui then self.board.ui.pb_line = line end
 end
 
 -- "wave1: A x3, B x2 | wave2: ..." from the generated encounter.
@@ -957,6 +989,7 @@ function Game:hook_RecordRunCleared(base, ...)
 		self.race.finished = true
 		self.race.cleared = true
 		self.log('game: race run cleared')
+		pcall(self.finish_splits, self)
 		if self.client then self.client:report_complete(true, nil, self:run_stats(), self:build_list()) end
 	end
 	return res
@@ -987,9 +1020,20 @@ function Game:go_home(why)
 	run.NextHeroStartPoint, run.NextHeroEndPoint = 40009, 40012
 	self:spawn(function()
 		if G.wait then G.wait(0.5) end
+		self:clear_run_upgrades()
 		G.LoadMap({ Name = 'Hub_PreRun' })
 	end)
 	return true
+end
+
+-- What KillHero does before the death map: the run's boons, hammers and
+-- other traits go (the Arcana that work while dead come back). Without it
+-- the hero walks into the Crossroads with the whole build.
+function Game:clear_run_upgrades()
+	local f = self:fn('ClearUpgrades')
+	if not f then return end
+	local ok, err = pcall(f)
+	if not ok then self.log('game: clearing the run\'s upgrades failed: ' .. tostring(err)) end
 end
 
 -- What KillHero does up to its death presentation (spawns stopped, music and
@@ -1020,6 +1064,7 @@ function Game:die_and_go_home(triggerArgs)
 		run.Hero.IsDead = true
 		run.NextHeroStartPoint, run.NextHeroEndPoint = 40009, 40012
 		if G.SessionMapState then G.SessionMapState.HandlingDeath = false end
+		self:clear_run_upgrades()
 		G.LoadMap({ Name = 'Hub_PreRun' })
 	end)
 	return true
@@ -1278,6 +1323,7 @@ function Game:start_race(race)
 		return
 	end
 	self:backup_loadout(race.weapon)
+	if self.board and self.board.ui then self.board.ui.pb_line = nil end
 	if race.weapon ~= '' and G.WeaponData and G.WeaponData[race.weapon] then
 		self:call('EquipPlayerWeapon', G.WeaponData[race.weapon], { SkipPresentation = true })
 		-- In competitive mode the player picked their aspect in the hub; otherwise use the base aspect.
@@ -1646,6 +1692,13 @@ end
 
 function Game:update()
 	pcall(self.diagnose, self, self.now())
+	-- Frames that stopped coming for a while: a pause or a load (diagnostics;
+	-- the frame callback rides the game's script update, which pauses too).
+	local t = self.now()
+	if self.last_frame and t - self.last_frame > 1 then
+		self.log(string.format('game: no frames for %.1f s', t - self.last_frame))
+	end
+	self.last_frame = t
 	pcall(self.fade_in_hub, self)
 	pcall(self.remember_loadout, self)
 	self:in_hub_now()

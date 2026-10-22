@@ -54,7 +54,7 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 
 4. **Play.** Start Hades II and pick **Play Competitive Speedrun** on the title
    screen. You arrive in the Crossroads; the Race Board is at the Pitch-Black
-   Stone (the hint at the bottom of the screen points there). The first time it
+   Stone (the hint at the top of the screen points there). The first time it
    shows a welcome page: competitive mode uses a 100% completed save, so expect
    story spoilers. Everything works with a controller.
 
@@ -72,7 +72,7 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 - Then you have **2 minutes** in the Crossroads to set your Arcana, familiar and
   aspect. The voted weapon and keepsake are already equipped; other weapons and the
   keepsake rack stay locked until the race starts, and you can swap keepsakes
-  between regions as usual (close the board with B; the hint at the bottom of the screen says where
+  between regions as usual (close the board with B; the hint at the top of the screen says where
   to reopen it: the Pitch-Black Stone). Walk to the voted route's exit and use it
   ("Ready to Race"), or press **Ready Now** on the board. The top right of the
   screen shows the time left and who is ready. The race starts as soon as
@@ -86,13 +86,15 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 - Every room has the same layout and enemies for everyone whatever doors and
   boons you pick, and the same rewards, gods, shop and well stock are on offer
   as far as your build allows; choices only change what you take.
-- One real-time race clock (top right) never pauses. Each rival shows as a shadow
+- One real-time race clock (top right) never pauses. Under it, each region's split
+  as you leave it, against your personal best for that route (green ahead, red
+  behind); the results page says how the clear compares with your best. Each rival shows as a shadow
   Melinoë (in their own colour, attacking and dashing as they do) when you share
   a room (marked PAUSED while their game is paused), plus a row on the rival
   plate with their depth, HP and (in a 1v1) boons.
-- **Chat:** quick lines (GG, Good luck!, I'm using tilt controls, ...) or your own
-  on the on-screen keyboard, from the board's Chat button or, mid-run, the pause
-  menu's **Race Menu** (which also has Forfeit Race).
+- **Chat:** quick lines only (GG, Good luck!, I'm using tilt controls, ...), from
+  the board's Chat button or, mid-run, the pause menu's **Race Menu** (which also
+  has Forfeit Race). There is no free text, so nobody can send you anything else.
 - **Rules:** first to clear wins. Dying, **Forfeit Race** (pause menu) or
   disconnecting is a DNF: the others still have to clear to win, and if nobody
   clears it's a draw. If a rival clears first you can keep going to post your

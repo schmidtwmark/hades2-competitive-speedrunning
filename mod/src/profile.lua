@@ -304,8 +304,12 @@ function Profile.build(G, saved)
 
 	-- Familiars and all their upgrades.
 	n = 0
+	GS.TraitsTaken = GS.TraitsTaken or {}
 	for _, familiar in ipairs(G.FamiliarOrderData or {}) do
 		GS.FamiliarsUnlocked[familiar] = true
+		-- Their traits count as taken: an untaken one puts a "!" over the familiar.
+		local data = G.FamiliarData and G.FamiliarData[familiar]
+		for _, trait in ipairs(type(data) == 'table' and data.TraitNames or {}) do GS.TraitsTaken[trait] = true end
 		n = n + 1
 	end
 	local shop = G.ScreenData and G.ScreenData.FamiliarShop

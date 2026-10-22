@@ -29,6 +29,7 @@
 --   probe_overlay in the competitive Crossroads, open Hell2Modding's overlay and wait for
 --                 a controller press to close it (scripts/e2e-overlay-pad.sh)
 --   change_arcana once in the competitive Crossroads, take one Arcana card off (or put one on)
+--   preview_split once the race run is live, record a region split by hand (screenshots)
 --   preview_count show this countdown text in the Crossroads (font screenshots)
 --   press_competitive_again  also press the title-screen entry after a quit to the menu
 --   use_board     do lobby actions by pressing Race Board controls (the same
@@ -226,6 +227,17 @@ function Bot:update()
 		end
 		self.arcana_changed = true
 		self.log('bot: changed the Arcana card ' .. tostring(pick))
+	end
+	-- preview_split: once the race run is live, record a region split by hand
+	-- (screenshots of the split line without playing a whole region).
+	if self.cfg.preview_split and not self.split_previewed and self.game:race_run_live() then
+		local sp = self.game.race.splits
+		if sp and c:race_time() > 3 then
+			self.split_previewed = true
+			sp.current = sp.current or 'F'
+			sp:room('G_Intro', c:race_time())
+			self.log('bot: previewed a split')
+		end
 	end
 	-- preview_count: show this countdown text in the Crossroads (font screenshots).
 	if self.cfg.preview_count and self.game.banner then
@@ -671,6 +683,21 @@ function Bot:step_result(now, c, st)
 			return
 		end
 		self:check('results screen shown', shown, b and tostring(b.rendered))
+	end
+	-- Back in the Crossroads the run's boons are gone, as after a real death.
+	if self.cfg.expect and not self.home_checked then
+		if not self.game:in_hub() and now - (self.home_wait or now) < 30 then
+			self.home_wait = self.home_wait or now
+			return
+		end
+		self.home_checked = true
+		if self.game:in_hub() then
+			local ok, build = pcall(self.game.build_list, self.game)
+			local n = ok and type(build) == 'table' and #build or -1
+			self:check('boons cleared back home', n == 0, 'boons=' .. n)
+		else
+			self.log('bot: not back in the Crossroads; boons not checked')
+		end
 	end
 	if self.cfg.chat then
 		local mine, theirs = false, false

@@ -74,7 +74,7 @@ export type ClientMessage =
   | { type: "rematch" }
   /** Host of a private lobby: stop waiting for more racers and start voting. */
   | { type: "start_race" }
-  /** A chat line to everyone in the lobby (quick line or typed, 1-80 characters). */
+  /** A chat line to everyone in the lobby: one of the quick lines (chat.ts), nothing else. */
   | { type: "chat"; text: string }
   | { type: "ping"; t?: number };
 
@@ -201,7 +201,9 @@ export type ServerMessage =
   | { type: "error"; message: string; code: string; who?: "you" | "rival" | "both"; what?: "mod" | "game"; rival?: string }
   /** A chat line from someone in the lobby (also echoed to the sender). */
   | ({ type: "chat"; text: string } & Who)
-  | { type: "pong"; t: number | null; server_time: number };
+  | { type: "pong"; t: number | null; server_time: number }
+  /** How many racers are connected, in Find Match and in a race (sent on hello and when it changes). */
+  | { type: "presence"; online: number; searching: number; racing: number };
 
 export class ProtocolError extends Error {
   constructor(

@@ -83,7 +83,7 @@ for X in A B; do
   [ "${CODE:-0}" = 1 ] && ROLE=code
   cat >"$RUN/bot-$X.json" <<JSON
 {"role":"$ROLE","name":"Bot$X","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
- ${BOT_EXTRA:+$BOT_EXTRA,}"code_file":"Z:$TB/run/code","route":"${ROUTE:-underworld}","ready_via_door":${READY_VIA_DOOR:-false},"chat":"gl hf from $X","weapon":"WeaponAxe","keepsake":"${KEEPSAKE:-BossPreDamageKeepsake}",
+ ${BOT_EXTRA:+$BOT_EXTRA,}"code_file":"Z:$TB/run/code","route":"${ROUTE:-underworld}","ready_via_door":${READY_VIA_DOOR:-false},"chat":"Good luck!","weapon":"WeaponAxe","keepsake":"${KEEPSAKE:-BossPreDamageKeepsake}",
  "timeout":$((TIMEOUT - 60)),"quit_after":${QUIT_AFTER:-5},"show_ui":${SHOW_UI:-true},"dwell":${DWELL:-0},"expect_overlay":$([ "${OVERLAY:-0}" = 1 ] && echo true || echo false),"use_board":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"expect_results_screen":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"race_code":"$RACE_CODE","mutations":{$MUT_JSON},$COMP_JSON$PICK
  $EXTRA}
 JSON

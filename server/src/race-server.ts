@@ -3,6 +3,7 @@
 // injectable clock/timer and RNG so tests can run it deterministically.
 
 import { randomBytes } from "node:crypto";
+import { isQuickLine } from "./chat.js";
 import {
   PROTOCOL_VERSION,
   ProtocolError,
@@ -184,6 +185,8 @@ export class RaceServer {
   private byToken = new Map<string, Session>();
   private lobbies = new Map<string, Lobby>();
   private nextId = 1;
+  private presenceTimer: unknown = null;
+  private lastPresence = "";
 
   constructor(private readonly opts: ServerOptions) {}
 
@@ -292,6 +295,8 @@ export class RaceServer {
       prev.versions = versions;
       this.log(`resume ${prev.id} (${prev.name})`);
       prev.send(this.welcome(prev, true));
+      prev.send({ type: "presence", ...this.presence() });
+      this.presenceChanged();
       this.warnIfOutdated(prev);
       const lobby = prev.lobby;
       if (lobby) {
@@ -318,6 +323,8 @@ export class RaceServer {
     s.versions = versions;
     this.log(`hello ${s.id} name=${name} mod=${versions.mod ?? "?"} game=${versions.gameBuild ?? "?"}`);
     s.send(this.welcome(s, false));
+    s.send({ type: "presence", ...this.presence() });
+    this.presenceChanged();
     this.warnIfOutdated(s);
   }
 
@@ -336,6 +343,7 @@ export class RaceServer {
     const s = conn.session;
     if (s.conn !== conn) return;
     s.conn = null;
+    this.presenceChanged();
     const lobby = s.lobby;
     if (!lobby) {
       this.forget(s);
@@ -357,6 +365,41 @@ export class RaceServer {
   private forget(s: Session): void {
     this.sessions.delete(s.id);
     this.byToken.delete(s.token);
+    this.presenceChanged();
+  }
+
+  // ---------------------------------------------------------------- presence
+
+  /** Connected racers; of those, in Find Match (a public lobby still waiting) and in a race. */
+  presence(): { online: number; searching: number; racing: number } {
+    let online = 0;
+    let searching = 0;
+    let racing = 0;
+    for (const s of this.sessions.values()) {
+      if (!s.greeted || !s.connected) continue;
+      online++;
+      const lobby = s.lobby;
+      if (!lobby) continue;
+      if (lobby.phase === "waiting") {
+        if (lobby.isPublic) searching++;
+      } else if (lobby.phase !== "finished") {
+        racing++;
+      }
+    }
+    return { online, searching, racing };
+  }
+
+  /** The counts may have changed: tell everyone, at most once a second and only on a change. */
+  private presenceChanged(): void {
+    if (this.presenceTimer !== null) return;
+    this.presenceTimer = this.opts.scheduler.setTimeout(() => {
+      this.presenceTimer = null;
+      const p = this.presence();
+      const key = `${p.online}/${p.searching}/${p.racing}`;
+      if (key === this.lastPresence) return;
+      this.lastPresence = key;
+      for (const s of this.sessions.values()) if (s.greeted) s.send({ type: "presence", ...p });
+    }, 1000);
   }
 
   // ---------------------------------------------------------------- lobbies
@@ -528,6 +571,7 @@ export class RaceServer {
   private removeFromLobby(s: Session, outcome: "forfeit" | "disconnect"): void {
     const lobby = s.lobby;
     if (!lobby) return;
+    this.presenceChanged();
     if (lobby.phase === "racing" || lobby.phase === "countdown") this.onForfeit(s, outcome);
     lobby.players = lobby.players.filter((p) => p !== s);
     lobby.ready.delete(s.id);
@@ -598,6 +642,7 @@ export class RaceServer {
   }
 
   private broadcastState(lobby: Lobby): void {
+    this.presenceChanged();
     for (const p of lobby.players) {
       p.send({
         type: "lobby_state",
@@ -818,10 +863,11 @@ export class RaceServer {
   }
 
   /** Relay only: positions are useless a moment later, so nothing is stored. */
-  /** Chat: to everyone in the lobby, the sender included; at most one line a second each. */
+  /** Chat: a quick line to everyone in the lobby, the sender included; at most one a second each. */
   private onChat(s: Session, text: string): void {
     const lobby = s.lobby;
     if (!lobby) return this.error(s, "not_in_lobby", "Join a race to chat");
+    if (!isQuickLine(text)) return this.error(s, "chat_not_allowed", "Only the quick lines can be sent");
     const now = this.opts.scheduler.now();
     if (now - s.lastChat < 1000) return;
     s.lastChat = now;

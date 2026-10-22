@@ -55,7 +55,8 @@ function Board.safe(name)
 	return (tostring(name or '?'):gsub('[{}@]', ''))
 end
 
--- Chat: one-press lines, and the on-screen keyboard's keys (Aa toggles case).
+-- Chat: one-press lines only (no free text: the server relays nothing else,
+-- server/src/chat.ts keeps the same list).
 Board.QUICK_LINES = { 'GG', 'Good luck!', 'Nice!', 'Oops', 'Well played', 'Rematch?', "I'm using tilt controls",
 	"I'm a little nervous" }
 
@@ -75,8 +76,6 @@ Board.WELCOME_LINES = {
 	{ '(Claude, by Anthropic). It is fully open source:', 'grey' },
 	{ Board.REPO, 'grey' },
 }
-Board.CHAT_KEYS = "abcdefghijklmnopqrstuvwxyz0123456789!?.,'-"
-Board.CHAT_MAX = 60
 
 -- Where each route starts in the Crossroads (using it marks you ready).
 Board.ROUTE_START = { underworld = 'the stairs down', surface = 'the path to the Surface', dream = 'the Dream Dive' }
@@ -235,28 +234,9 @@ function Board.view(c, ui, now, names)
 		for i, text in ipairs(Board.QUICK_LINES) do
 			d.grid.items[#d.grid.items + 1] = { key = 'say_' .. i, label = text, action = 'say', arg = text }
 		end
-		button('type', 'Type a Message', 'chat_type')
 		button('back', 'Back', 'chat_back')
 		d.focus = 'say_1'
 		d.cancel = { action = 'chat_back', label = '{CN} Back' }
-		return d
-	end
-	if ui.prompt == 'chat_type' then
-		local text = ui.chat_text or ''
-		d.id, d.title = 'prompt:chat_type:' .. tostring(ui.chat_caps) .. ':' .. tostring(#text > 0), 'Type a Message'
-		line(text ~= '' and (Board.safe(text) .. '_') or '_', GOLD)
-		line('B deletes. Up to ' .. Board.CHAT_MAX .. ' characters.', GREY)
-		d.grid = { kind = 'keys', cols = 11, items = {} }
-		for ch in Board.CHAT_KEYS:gmatch('.') do
-			local shown = ui.chat_caps and ch:upper() or ch
-			d.grid.items[#d.grid.items + 1] = { key = 'chr_' .. ch, label = shown, action = 'chat_key', arg = shown }
-		end
-		d.grid.items[#d.grid.items + 1] = { key = 'chr_space', label = 'Space', action = 'chat_key', arg = ' ' }
-		d.grid.items[#d.grid.items + 1] = { key = 'chr_caps', label = 'Aa', action = 'chat_caps' }
-		if #text > 0 then button('send', 'Send', 'chat_send') end
-		button('back', 'Back', 'chat_type_back')
-		d.focus = 'chr_a'
-		d.cancel = { action = 'chat_backspace', label = #text > 0 and '{CN} Delete' or '{CN} Back' }
 		return d
 	end
 	-- In-run prompt from the race menu's Forfeit Race (or the pause menu's Quit).
@@ -306,6 +286,8 @@ function Board.view(c, ui, now, names)
 				line('Searching for other racers...')
 			end
 			line('Waiting ' .. fmt_clock(now - (st.queue.since or now)):gsub('%.%d+$', ''), GREY)
+			local online = Board.presence_text(st.presence)
+			if online then line(online, GREY) end
 			button('cancel_search', 'Cancel Search', 'cancel_queue')
 			d.cancel = { action = 'cancel_queue', label = '{CN} Cancel' }
 			return d
@@ -333,6 +315,8 @@ function Board.view(c, ui, now, names)
 			d.id = 'home:mismatch'
 		else
 			line('Same seed, same rooms, same foes. First to clear wins.', GREY)
+			local online = Board.presence_text(st.presence)
+			if online then line(online, GREY) end
 			local err = st.last_error
 			if err and now - (err.at or 0) < 10 then line(err.message or err.code, RED) end
 		end
@@ -384,6 +368,8 @@ function Board.view(c, ui, now, names)
 			d.id = d.id .. ':mismatch'
 		elseif alone then
 			line('Searching for other racers...')
+			local online = Board.presence_text(st.presence)
+			if online then line(online, GREY) end
 		else
 			line(n .. ' racers found (up to ' .. (lobby.max_players or n) .. ').')
 		end
@@ -525,6 +511,7 @@ function Board.view(c, ui, now, names)
 		d.title = r.draw and 'Draw' or (r.you_won and 'Victory' or 'Defeat')
 		d.title_color = r.draw and GOLD or (r.you_won and GREEN or RED)
 		line(REASONS[r.reason] or '', GREY)
+		if ui.pb_line then line(ui.pb_line, GOLD) end -- your clear against your personal best (game.lua)
 		local results = r.results or {}
 		if #results == 2 then
 			local me, them
@@ -549,17 +536,29 @@ function Board.view(c, ui, now, names)
 	return d
 end
 
+-- The weapon vote's hover frame: the Keepsake rack's portrait frame made
+-- square around the 0.85-scale aspect icons: x scale, y scale, y offset (its
+-- centre sits a little low). Measured on screenshots.
+Board.WEAPON_FRAME = { 1.1, 0.8, -8 }
+
 -- Presses are ignored this long after the board switches to another page.
 Board.SETTLE = 0.8
 
 -- Which page a description is, ignoring its live details: "ready" for
--- "ready:false", "prompt:chat_type" for "prompt:chat_type:nil:true".
+-- "ready:false", "prompt:chat" for "prompt:chat:3".
 function Board.page_kind(id)
 	id = tostring(id or '')
 	return id:match('^prompt:[^:]+') or id:match('^[^:]+') or id
 end
 
 -- Pages that need the player: the board opens itself for these in the hub.
+-- "4 racers online: 1 searching, 2 racing", or nil before the server said.
+function Board.presence_text(p)
+	if type(p) ~= 'table' or type(p.online) ~= 'number' then return nil end
+	if p.online <= 1 then return 'You are the only racer online right now.' end
+	return string.format('%d racers online: %d searching, %d racing', p.online, p.searching or 0, p.racing or 0)
+end
+
 function Board.wants_attention(id)
 	if id == nil then return false end
 	-- A private lobby's host, once someone joins: Start Race is up to them.
@@ -627,10 +626,8 @@ function Board:act(action, arg)
 	elseif action == 'chat' then
 		ui.chat_from = ui.prompt
 		ui.prompt = 'chat'
-	elseif action == 'say' or action == 'chat_send' then
-		local text = action == 'say' and arg or ui.chat_text
-		if text and text ~= '' then c:chat(text) end
-		ui.chat_text = ''
+	elseif action == 'say' then
+		if arg and arg ~= '' then c:chat(arg) end
 		-- In a run, straight back to the game; in the Crossroads, back to the page.
 		if ui.chat_from == 'race' then
 			ui.prompt = nil
@@ -641,16 +638,6 @@ function Board:act(action, arg)
 	elseif action == 'chat_back' then
 		ui.prompt = ui.chat_from
 		if ui.prompt == nil and self.in_run then self:close() end
-	elseif action == 'chat_type' then
-		ui.prompt, ui.chat_text = 'chat_type', ''
-	elseif action == 'chat_type_back' then
-		ui.prompt = 'chat'
-	elseif action == 'chat_key' then
-		if #(ui.chat_text or '') < Board.CHAT_MAX then ui.chat_text = (ui.chat_text or '') .. arg end
-	elseif action == 'chat_caps' then
-		ui.chat_caps = not ui.chat_caps
-	elseif action == 'chat_backspace' then
-		if #(ui.chat_text or '') > 0 then ui.chat_text = ui.chat_text:sub(1, -2) else ui.prompt = 'chat' end
 	elseif action == 'race_forfeit' then
 		ui.prompt = 'forfeit'
 	elseif action == 'forfeit_confirm' then
@@ -799,10 +786,17 @@ function Board:render(d)
 		local cols = math.min(g.cols, n)
 		local x0 = cx - (cols - 1) * step_x / 2
 		local y0 = top + (g.kind == 'weapon' and 60 or 50)
-		-- Behind the buttons, like the Keepsake rack's cursor frame.
+		-- Behind the buttons, like the Keepsake rack's cursor frame. The frame is
+		-- portrait-shaped like keepsake art; around the square weapon icons it
+		-- is squashed to a square.
 		if not words then
-			self:component('HoverFrame', { Name = 'BlankObstacle', X = -1000, Y = -1000, Group = BACK_GROUP,
+			local frame = self:component('HoverFrame', { Name = 'BlankObstacle', X = -1000, Y = -1000, Group = BACK_GROUP,
 				Animation = 'AwardMenuCursorHighlight', Scale = g.kind == 'keys' and 0.7 or 1 })
+			if g.kind == 'weapon' and G.SetScaleY and G.SetScaleX then
+				G.SetScaleX({ Id = frame.Id, Fraction = Board.WEAPON_FRAME[1] })
+				G.SetScaleY({ Id = frame.Id, Fraction = Board.WEAPON_FRAME[2] })
+				frame.HoverOffsetY = Board.WEAPON_FRAME[3]
+			end
 		end
 		for i, item in ipairs(g.items) do
 			local col, row = (i - 1) % g.cols, math.floor((i - 1) / g.cols)
@@ -994,7 +988,7 @@ function Board:hover(comp, on)
 	if not comps then return end
 	if comps.HoverFrame then
 		if on then
-			self.G.Teleport({ Id = comps.HoverFrame.Id, DestinationId = comp.Id })
+			self.G.Teleport({ Id = comps.HoverFrame.Id, DestinationId = comp.Id, OffsetY = comps.HoverFrame.HoverOffsetY or 0 })
 		else
 			self.G.Teleport({ Id = comps.HoverFrame.Id, OffsetX = -1000, OffsetY = -1000 })
 		end
@@ -1157,8 +1151,9 @@ function Board:update(in_hub)
 	if not ok then self:fail('updating', err) end
 end
 
--- While the board is closed in the competitive hub, a line at the bottom of
--- the screen says where it is (players who close it otherwise lose it).
+-- While the board is closed in the competitive hub, a line at the top of the
+-- screen says where it is (players who close it otherwise lose it). Not at
+-- the bottom: the game's interact prompts appear there.
 Board.HINT_TEXT = 'Race Board: {I} at the Pitch-Black Stone'
 function Board:update_hint(show)
 	local G, ms = self.G, self.G.MapState
@@ -1166,7 +1161,7 @@ function Board:update_hint(show)
 	local id = ms.RankedRaceBoardHint
 	if show and not id then
 		id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = 'Combat_Menu_TraitTray_Overlay',
-			X = G.ScreenCenterX or 960, Y = (G.ScreenHeight or 1080) - 54 })
+			X = G.ScreenCenterX or 960, Y = 36 })
 		G.CreateTextBox(text_args(id, Board.HINT_TEXT, 'LatoMedium', 22, GREY, { Width = 900 }))
 		ms.RankedRaceBoardHint = id
 		self.hint_shown = nil

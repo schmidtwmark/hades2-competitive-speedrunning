@@ -230,11 +230,34 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   overlay: `IsControlDown({Name="Cancel"})` still reads the pad while the overlay blocks input; ImGui's
   gamepad keys don't (Back does nothing). Gate: `scripts/e2e-overlay-pad.sh` (virtual pad, B). (Lua `update()` stops while the game is paused; the ImGui
   frame callback doesn't, so the paused racer keeps reporting.)
-- **Chat** (`chatfeed.lua`, board pages, server `chat`): quick lines and an on-screen keyboard on the
-  Race Board (lobby, prep, results) and, mid-run, from the pause menu's "Race Menu" (the relabelled
-  Undo Night: Chat / Forfeit Race / Back; Quit still asks to forfeit). The server relays a line to
-  the whole lobby (sender included), 1-80 characters, one a second. The last four lines show top
+- **Chat** (`chatfeed.lua`, board pages, server `chat`): quick lines on the Race Board (lobby, prep,
+  results) and, mid-run, from the pause menu's "Race Menu" (the relabelled Undo Night: Chat / Forfeit
+  Race / Back; Quit still asks to forfeit). Since 0.5.6 there is no free text: the board's keyboard is
+  gone and the server relays only the exact quick lines (`server/src/chat.ts`, kept equal to
+  `Board.QUICK_LINES` by a server test), to the whole lobby (sender included), one a second. The last four lines show top
   left for 10 s, above menus.
+- **The race clock while paused** stays frozen on screen (it jumps to the right real time on
+  resume). Checked in game (0.5.6 attempts): the mod's frame callbacks ride the game's script
+  update, which stops while paused ("no frames for 7 s"); a hook on native `PauseScreen::Update`
+  (RVA 0x17fcd0, runs every paused frame) can call `ModifyTextBox`, but the paused picture is a
+  frozen, dimmed image of everything except the pause screen's own native components, so neither
+  native text boxes nor ImGui from Lua can show a counting clock.
+- **Vote grids** (0.5.6): the hover frame is the Keepsake rack's portrait `AwardMenuCursorHighlight`;
+  around the square weapon icons it is `SetScaleX` 1.1 / `SetScaleY` 0.8 and moved up 8 units
+  (`Board.WEAPON_FRAME`, measured on screenshots). The shops' `BoonSlotHighlight` is a large
+  decorative swoosh, not an icon frame.
+- **Presence** (0.5.6): the server sends `presence` {online, searching, racing} on hello and when the
+  counts change (at most once a second); the board's home and Find Match pages show it. Older
+  clients log it as unhandled; older servers never send it.
+- **Region splits and PBs** (0.5.6, `splits.lua`): a region is a room name's biome letter (Chaos,
+  the Crossroads and Dream_Intro have none); leaving it (the next region's first room) is its split,
+  the clear the last. Race times, kept per route in `plugins_data/.../pb.json` (the fastest cleared
+  run's splits; Dream Dive regions are numbered). The latest split shows under the race clock with
+  its delta on the PB's split; the results page says how the clear compares.
+- **Back home after a race** (0.5.6): `go_home` / `die_and_go_home` now call `ClearUpgrades()` as
+  `KillHero` does before the death map; before, the hero walked into the Crossroads with the whole
+  build. The profile marks each familiar's traits taken (`GameState.TraitsTaken`): an untaken one
+  puts a "!" over the familiar (FamiliarLogic).
 - **Banners** (`mod/src/banner.lua`): 3-2-1-GO from the server start time; result via
   `DisplayInfoBanner` (the biome-cleared banner).
 - **Map loads destroy objects and the engine reuses their ids.** Every object id the mod
@@ -324,7 +347,7 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   of their own. At GO the mod calls `StartOver` with what that door passes (Surface:
   `StartingBiome = "N", RandomOffset = 1`; Dream: `StartingRoomName = "Dream_Intro"`,
   `RunOverrides = { IsDreamRun = true, BiomeDepthCache = 1 }`). Dream biomes (`SelectNextDreamBiome`)
-  and mid-run starting rooms are seeded per race. A hint at the bottom of the competitive hub says
+  and mid-run starting rooms are seeded per race. A hint at the top of the competitive hub says
   where the board is while it's closed.
 - **Results screen:** the board's finished page compares both racers of a 1v1 like the run
   clear screen (result + time, depth, damage dealt/taken, foes slain, healing, gold, chambers,
