@@ -764,6 +764,21 @@ describe("route vote and prep time", () => {
   });
 });
 
+describe("no-preference votes", () => {
+  it("an \"any\" vote counts as voted but not toward an option, so the others' pick wins at once", () => {
+    const { a, b } = pair();
+    assert.equal(a.state().phase, "voting_weapon");
+    const weapon = a.last("vote_phase").options[2]!.id;
+    b.send({ type: "vote_weapon", weapon: "any" });
+    assert.equal(b.all("error").length, 0, "accepted");
+    a.send({ type: "vote_weapon", weapon });
+    const r = a.last("vote_result");
+    assert.equal(r.selected, weapon, "resolved without waiting for the timer");
+    assert.deepEqual(r.counts, { [weapon]: 1 });
+    assert.equal(r.votes.opponent, null, "shown as no vote");
+  });
+});
+
 describe("presence", () => {
   it("tells racers how many are online, searching and racing, once a second at most", () => {
     const { server, scheduler } = makeServer();

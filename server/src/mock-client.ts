@@ -4,13 +4,14 @@
 //   node dist/src/mock-client.js --name Bot --create --code-file /tmp/code
 //   node dist/src/mock-client.js --name Bot --join ABCD --outcome win --finish-after 20
 //   node dist/src/mock-client.js --name Bot --queue          (Find Match)
+//   node dist/src/mock-client.js --name Bot --queue --follow (votes "any": the others' picks win)
 //
 // Prints one JSON line per received message and a final `RESULT: <json>` line.
 
 import net from "node:net";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { parseArgs } from "node:util";
-import type { ServerMessage } from "./protocol.js";
+import { NO_PREFERENCE, type ServerMessage } from "./protocol.js";
 
 export interface MockOptions {
   host: string;
@@ -31,6 +32,8 @@ export interface MockOptions {
   timeout: number;
   /** As host of a private lobby, start the race once this many racers are in (default 2). */
   startAt?: number;
+  /** Vote "any" in every vote, so the other racers' picks decide (and the vote ends once they voted). */
+  follow?: boolean;
   /** Pretend to be this mod version / game build (default: unknown, which never blocks). */
   version?: string;
   gameBuild?: number;
@@ -101,7 +104,7 @@ export function runMock(o: MockOptions): Promise<MockResult> {
           break;
         case "vote_phase": {
           const want = m.phase === "route" ? o.route : m.phase === "weapon" ? o.weapon : o.keepsake;
-          const choice = want ?? m.options[0]?.id;
+          const choice = o.follow ? NO_PREFERENCE : (want ?? m.options[0]?.id);
           if (choice) send({ type: `vote_${m.phase}`, [m.phase]: choice });
           break;
         }
@@ -198,6 +201,7 @@ async function main() {
       quiet: { type: "boolean", default: false },
       version: { type: "string" },
       "start-at": { type: "string" },
+      follow: { type: "boolean", default: false },
       "game-build": { type: "string" },
     },
   });
@@ -222,6 +226,7 @@ async function main() {
     timeout: Number(values.timeout),
     version: values.version,
     startAt: values["start-at"] ? Number(values["start-at"]) : undefined,
+    follow: values.follow!,
     gameBuild: values["game-build"] ? Number(values["game-build"]) : undefined,
   });
   console.log(`RESULT: ${JSON.stringify(res)}`);

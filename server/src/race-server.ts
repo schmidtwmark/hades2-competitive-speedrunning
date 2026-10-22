@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { isQuickLine } from "./chat.js";
 import {
+  NO_PREFERENCE,
   PROTOCOL_VERSION,
   ProtocolError,
   parseClientMessage,
@@ -717,7 +718,7 @@ export class RaceServer {
   private onVote(s: Session, phase: VotePhase, choice: string): void {
     const lobby = s.lobby;
     if (!lobby || lobby.phase !== `voting_${phase}`) return this.error(s, "not_voting", `Not in ${phase} vote`);
-    if (!this.pool(phase).some((o) => o.id === choice)) {
+    if (choice !== NO_PREFERENCE && !this.pool(phase).some((o) => o.id === choice)) {
       return this.error(s, "bad_choice", `Unknown ${phase} '${choice}'`);
     }
     lobby.votes[phase].set(s.id, choice);
@@ -738,14 +739,14 @@ export class RaceServer {
 
   /**
    * Most votes wins; a tie is broken at random among the tied options; with no
-   * votes at all, a random option from the pool.
+   * votes at all (or only "any"), a random option from the pool.
    */
   private resolveVote(lobby: Lobby, phase: VotePhase): void {
     const pool = this.pool(phase);
     const counts: Record<string, number> = {};
     for (const p of lobby.players) {
       const v = lobby.votes[phase].get(p.id);
-      if (v) counts[v] = (counts[v] ?? 0) + 1;
+      if (v && v !== NO_PREFERENCE) counts[v] = (counts[v] ?? 0) + 1;
     }
     const best = Math.max(0, ...Object.values(counts));
     const tied = Object.keys(counts).filter((k) => counts[k] === best);
@@ -759,13 +760,18 @@ export class RaceServer {
         phase,
         selected,
         votes: {
-          you: lobby.votes[phase].get(p.id) ?? null,
-          opponent: others.length === 1 ? lobby.votes[phase].get(others[0]!.id) ?? null : null,
+          you: this.shownVote(lobby, phase, p.id),
+          opponent: others.length === 1 ? this.shownVote(lobby, phase, others[0]!.id) : null,
         },
         counts,
       });
     }
     this.afterVote(lobby, phase);
+  }
+
+  private shownVote(lobby: Lobby, phase: VotePhase, id: string): string | null {
+    const v = lobby.votes[phase].get(id);
+    return v && v !== NO_PREFERENCE ? v : null;
   }
 
   /** Next vote, or the prep time: the race starts once everyone is ready, or when it runs out. */

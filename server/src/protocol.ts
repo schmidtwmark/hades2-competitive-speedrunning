@@ -2,6 +2,9 @@
 // with a string `type`. See plan.md "Message protocol" for the original table;
 // this file is the authoritative list.
 
+/** A vote for no option in particular: counts as voted, adds no vote (the mock bot's "follow" mode). */
+export const NO_PREFERENCE = "any";
+
 export const PROTOCOL_VERSION = 1;
 
 /** Voted in this order: where the run goes, then the weapon, then the keepsake. */
