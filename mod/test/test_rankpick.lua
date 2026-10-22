@@ -114,3 +114,17 @@ T.case('rank pick: limit leaves later picks to the game; no race, no change', fu
 	g.launching = nil
 	T.eq(g:rank_scope({ 'x' }, nil, function() return G.GetRandomValue({ 'M', 'N' }) end), 'M', 'not racing: game picks')
 end)
+
+T.case('main path: a room skipped through a Chaos detour counts as visited for room choice', function()
+	local g = fake_game()
+	g.race = { main_path = { [2] = 'F_Combat07', [3] = 'F_Combat10', [4] = 'F_Combat08' } }
+	-- Took Chaos at depth 3: never entered F_Combat08.
+	local run = { RoomHistory = { { Name = 'F_Opening01' }, { Name = 'F_Combat07' }, { Name = 'F_Combat10' } },
+		CurrentRoom = { Name = 'Chaos_01' }, RoomCountCache = { F_Combat10 = 1 }, BiomeRoomCountCache = { F_Combat10 = 1 } }
+	local seen = g:with_main_path_visited(run, function()
+		return run.BiomeRoomCountCache.F_Combat08, run.BiomeRoomCountCache.F_Combat10, run.RoomCountCache.F_Combat07
+	end)
+	T.eq(seen, 1, 'skipped main room counted once')
+	T.eq(run.BiomeRoomCountCache.F_Combat08, nil, 'restored afterwards')
+	T.eq(run.BiomeRoomCountCache.F_Combat10, 1, 'visited rooms untouched')
+end)

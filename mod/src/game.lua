@@ -32,7 +32,8 @@ local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', '
 	'HandleUpgradeChoiceSelection', 'HandleStorePurchase', 'UseEscapeDoor', 'UseDreamRunDoor', 'SelectNextDreamBiome',
 	'UnlockAchievement', 'CheckProgressAchievements', 'CheckAchievement', 'ChooseLoot', 'FillInShopOptions',
 	'SetTraitsOnLoot', 'HandleBreakableSwap', 'CheckMoneyDrop', 'ProcessObjectValueOptions',
-	'CheckChallengeSwitchItemValidity', 'CheckPlayerOnFirePowers', 'ChooseSpell', 'CreateSpellButtons' }
+	'CheckChallengeSwitchItemValidity', 'CheckPlayerOnFirePowers', 'ChooseSpell', 'CreateSpellButtons',
+	'IsSecretDoorEligible', 'ChooseNextRewardStore' }
 
 -- Shadow animations for hero actions whose fire graphic isn't the visible move.
 local ACTION_ANIMS = { WeaponBlink = 'MelinoeDashStart', WeaponSprint = 'MelinoeSprint' }
@@ -564,6 +565,26 @@ function Game:hook_HandleUpgradeChoiceSelection(base, screen, button, args)
 	return base(screen, button, args)
 end
 
+-- Which reward pool a room's doors draw from (RunProgress: boons, hammers, max
+-- health...; MetaProgress: Ashes, Bones, Nectar...). The game rolls a chance
+-- nudged toward a target ratio by the rewards already in your history, and a
+-- Chaos room can carry its own ratio, so racers who picked differently or took
+-- a Chaos detour drew from different pools at the same depth. In a race the
+-- roll uses the plain target ratio, on the depth's room seed (the game
+-- resynchronises the RNG first), so every racer gets the same pool.
+function Game:hook_ChooseNextRewardStore(base, run)
+	if not (run and self:race_run_live()) or (self.mutations and self.mutations.no_depth_seed) then return base(run) end
+	local G, room = self.G, run.CurrentRoom
+	local calc, room_ratio = G.CalcMetaProgressRatio, room and room.TargetMetaRewardsRatio
+	G.CalcMetaProgressRatio = function() return nil end
+	if room then room.TargetMetaRewardsRatio = nil end
+	local ok, res = pcall(base, run)
+	G.CalcMetaProgressRatio = calc
+	if room then room.TargetMetaRewardsRatio = room_ratio end
+	if not ok then error(res, 0) end
+	return res
+end
+
 -- Which god a boon door (or other loot) offers: one ranked pick.
 function Game:hook_ChooseLoot(base, exclude, force)
 	if not self:race_seed() then return base(exclude, force) end
@@ -622,6 +643,13 @@ for _, name in ipairs(NPC_CHOICES) do
 	end
 end
 
+-- Test bot option (bot.json "force_chaos_door"): a Chaos gate in every room
+-- that can have one, to test what a detour does to depth tracking.
+function Game:hook_IsSecretDoorEligible(base, ...)
+	if self.bot_cfg and self.bot_cfg.force_chaos_door and self:race_run_live() then return true end
+	return base(...)
+end
+
 -- Selene: which hex a moon reward is, and the three hexes her screen offers.
 function Game:hook_ChooseSpell(base, room, args)
 	if not self:race_seed() then return base(room, args) end
@@ -651,6 +679,36 @@ function Game:hook_CheckChallengeSwitchItemValidity(base, run)
 	return self:seeded_call(base, { 'switch', self:race_depth() }, run)
 end
 
+-- A racer who takes a side room (a Chaos gate) skips that depth's main room,
+-- so the game still counts it as unvisited and may offer it later, where the
+-- others can't get it (they've been in it; rooms don't repeat), and the racers
+-- end up on different rooms until a fixed room (miniboss, shop, boss) lines
+-- them up again. For room choice, count every main-path room as visited.
+function Game:with_main_path_visited(run, fn)
+	local path = self.race and self.race.main_path
+	if not (path and run and run.RoomCountCache and run.BiomeRoomCountCache) then return fn() end
+	local visited = {}
+	for _, room in ipairs(run.RoomHistory or {}) do visited[room.Name] = true end
+	if run.CurrentRoom then visited[run.CurrentRoom.Name] = true end
+	local added = {}
+	for _, name in pairs(path) do
+		if not visited[name] then added[name] = true end
+	end
+	for name in pairs(added) do
+		run.RoomCountCache[name] = (run.RoomCountCache[name] or 0) + 1
+		run.BiomeRoomCountCache[name] = (run.BiomeRoomCountCache[name] or 0) + 1
+	end
+	local results = { pcall(fn) }
+	for name in pairs(added) do
+		run.RoomCountCache[name] = run.RoomCountCache[name] - 1
+		run.BiomeRoomCountCache[name] = run.BiomeRoomCountCache[name] - 1
+		if run.RoomCountCache[name] <= 0 then run.RoomCountCache[name] = nil end
+		if run.BiomeRoomCountCache[name] <= 0 then run.BiomeRoomCountCache[name] = nil end
+	end
+	if not results[1] then error(results[2], 0) end
+	return results[2]
+end
+
 -- Every generic exit door at a depth leads to the same next room; each door
 -- keeps its own reward (chosen later per door).
 function Game:hook_ChooseNextRoomData(base, run, args, other_doors)
@@ -660,7 +718,14 @@ function Game:hook_ChooseNextRoomData(base, run, args, other_doors)
 	end
 	if ctx.room_data then return ctx.room_data end
 	self:reseed('route', ctx.depth)
-	ctx.room_data = self:rank_scope({ 'route', ctx.depth }, nil, base, run, args, other_doors)
+	ctx.room_data = self:with_main_path_visited(run, function()
+		return self:rank_scope({ 'route', ctx.depth }, nil, base, run, args, other_doors)
+	end)
+	-- The main path: the room every generic door at this depth leads to.
+	if self.race and ctx.room_data then
+		self.race.main_path = self.race.main_path or {}
+		self.race.main_path[ctx.depth + 1] = ctx.room_data.Name
+	end
 	return ctx.room_data
 end
 
@@ -1562,12 +1627,17 @@ function Game:bot_advance_room()
 		elseif now >= a.next_act then
 			a.next_act = now + 1
 			local encounter = room.Encounter
-			if encounter and not encounter.StartTime and not a.teleported then
+			-- Walk onto the fight's start trigger; again every few seconds while it
+			-- hasn't started (a reward picked up after the first visit gates it).
+			if encounter and not encounter.StartTime and now - (a.teleported or -math.huge) > 4 then
 				local ids = self:call('GetIdsByType', { Name = 'EncounterStartPoint' })
 				if ids and ids[1] then
-					a.teleported = true
-					self.log('game: bot walking to encounter start ' .. tostring(ids[1]))
-					self:call('Teleport', { Id = run.Hero.ObjectId, DestinationId = ids[1] })
+					a.teleported = now
+					a.trigger_visits = (a.trigger_visits or 0) + 1
+					-- Alternate on and off the point, so each visit is a fresh entry.
+					local away = a.trigger_visits % 2 == 0
+					self.log('game: bot walking ' .. (away and 'away from' or 'to') .. ' encounter start ' .. tostring(ids[1]))
+					self:call('Teleport', { Id = run.Hero.ObjectId, DestinationId = ids[1], OffsetX = away and 600 or 0 })
 				end
 			end
 			if not a.killing and G.RequiredKillEnemies and next(G.RequiredKillEnemies) then
@@ -1577,9 +1647,10 @@ function Game:bot_advance_room()
 					a.killing = false
 				end)
 			elseif not a.killing and now - a.t0 > 12 and G.ActiveEnemies and next(G.ActiveEnemies)
-				and ((encounter and encounter.StartTime and not encounter.Completed) or self:bot_pylon_left()) then
+				and ((encounter and not encounter.Completed) or self:bot_pylon_left()) then
 				-- Fights won by breaking things rather than killing required
-				-- enemies (Arachne's cocoons, the Surface's Soul Pylons): clear everything left.
+				-- enemies (Arachne's cocoons, the Surface's Soul Pylons), or delayed
+				-- starts that wait for an enemy to notice you: clear everything left.
 				a.killing = true
 				self.log('game: bot clearing every active enemy (' .. tostring(encounter.Name) .. ')')
 				self:spawn(function()
@@ -1596,7 +1667,8 @@ function Game:bot_advance_room()
 			-- Rewards can gate the fight (opening room: boon first) or follow it.
 			-- A gating reward isn't always a required object (Selene's moon in
 			-- the opening room): use the room's reward if the fight won't start.
-			if encounter and not encounter.StartTime and now - a.t0 > 6 and not a.used_room_reward then
+			if encounter and not encounter.StartTime and now - a.t0 > 6 and not a.used_room_reward
+				and not next(a.used or {}) then
 				local name = room.ForceLootName or room.ChosenRewardType
 				local ids = name and self:call('GetIdsByType', { Name = name })
 				local obj = ids and ids[1] and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[ids[1]]
@@ -1617,6 +1689,7 @@ function Game:bot_advance_room()
 	elseif a.phase == 'pick_door' then
 		local doors = G.MapState and G.MapState.OfferedExitDoors
 		local highest = self.bot_cfg and self.bot_cfg.door_pick == 'highest'
+		local chaos_first = self.bot_cfg and self.bot_cfg.door_pick == 'chaos'
 		local best
 		-- Chaos gates are optional side rooms (their own room, a Chaos trial the
 		-- bot can't take): only use one when it is the sole exit.
@@ -1624,7 +1697,16 @@ function Game:bot_advance_room()
 		for _, door in pairs(doors or {}) do
 			if type(door) == 'table' and door.Room and not tostring(door.Room.Name):match('^Chaos') then regular = regular + 1 end
 		end
-		for id, door in pairs(doors or {}) do
+		-- door_pick "chaos": take a Chaos gate whenever one is offered (tests depth tracking).
+		if chaos_first then
+			for id, door in pairs(doors or {}) do
+				if type(door) == 'table' and door.Room and tostring(door.Room.Name):match('^Chaos') then
+					best = door
+					best.ObjectId = door.ObjectId or id
+				end
+			end
+		end
+		for id, door in pairs(best and {} or doors or {}) do
 			if type(door) == 'table' and door.Room and (regular == 0 or not tostring(door.Room.Name):match('^Chaos')) then
 				local oid = door.ObjectId or id
 				local better = not best or (highest and oid > best.ObjectId) or (not highest and oid < best.ObjectId)
@@ -1660,20 +1742,33 @@ end
 -- way the game's OnUsed handler does when the player presses interact.
 function Game:bot_collect_rewards(a)
 	local G = self.G
-	-- UseLoot and friends refuse while any screen (dialogue, menus) is open.
-	if G.AreScreensActive and G.AreScreensActive() then return end
-	a.used = a.used or {}
 	local now = self.now()
+	-- UseLoot and friends refuse while any screen (dialogue, menus) is open.
+	if G.AreScreensActive and G.AreScreensActive() then
+		if now - (a.screens_logged or 0) > 10 and next((G.MapState and G.MapState.RoomRequiredObjects) or {}) then
+			a.screens_logged = now
+			self.log('game: bot waiting for screens to close before using rewards')
+		end
+		return
+	end
+	a.used = a.used or {}
 	local enc = a.room and a.room.Encounter
 	for id, required in pairs((G.MapState and G.MapState.RoomRequiredObjects) or {}) do
-		-- The live object (what OnUsed would receive) may be a different table;
-		-- consumables default to UseConsumableItem (CreateConsumableItemFromData).
-		local obj = (G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id]) or required
+		-- The live object (what OnUsed would receive) may be a different table:
+		-- loot is the LootObjects entry (the map object can be bare, e.g. Chaos's
+		-- boon); consumables default to UseConsumableItem (CreateConsumableItemFromData).
+		local obj = (G.LootObjects and G.LootObjects[id]) or (G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id])
+			or required
 		-- Field NPCs (Artemis...) fight alongside you and give their boon after
 		-- the encounter; talking to them first leaves the room stuck.
 		if type(obj) == 'table' and tostring(obj.Name):match('^NPC_') and enc and not enc.Completed then obj = nil end
 		if type(obj) == 'table' and not obj.OnUsedFunctionName and G.ConsumableData and G.ConsumableData[obj.Name] then
 			obj.OnUsedFunctionName = 'UseConsumableItem'
+		end
+		if type(obj) == 'table' and not obj.OnUsedFunctionName and now - (a.skip_logged or 0) > 10 then
+			a.skip_logged = now
+			self.log('game: bot cannot use ' .. tostring(obj.Name) .. ' (no OnUsedFunctionName; live object '
+				.. tostring(G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[id] ~= nil) .. ')')
 		end
 		if now - (a.used[id] or -math.huge) > 8 and type(obj) == 'table' and obj.OnUsedFunctionName then
 			a.used[id] = now

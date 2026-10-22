@@ -472,9 +472,15 @@ function Board.view(c, ui, now, names)
 			line(#rivals == 1 and (opp .. ' is ready.') or 'Everyone else is ready.', GREEN)
 		end
 		d.show = { { kind = 'weapon', id = w }, { kind = 'keepsake', id = k } }
-		if not me_ready then button('ready', 'Ready', 'ready') end
+		-- The focused button closes the board: the page opens by itself right
+		-- after the votes, and a stray confirm press must not ready you before
+		-- you've set your Arcana, familiar and aspect.
+		button('setup', 'Set Up My Run', 'close')
+		if not me_ready then button('ready', 'Ready Now', 'ready') end
 		button('chat', 'Chat', 'chat')
 		button('leave', 'Leave Race', 'leave')
+		d.focus = 'setup'
+		d.button_cols = 2
 	elseif phase == 'countdown' then
 		d.id, d.title = 'countdown', 'Get Ready'
 		line('The race is starting.')
@@ -541,6 +547,16 @@ function Board.view(c, ui, now, names)
 		d.id, d.title = 'phase:' .. tostring(phase), 'Competitive Speedrun'
 	end
 	return d
+end
+
+-- Presses are ignored this long after the board switches to another page.
+Board.SETTLE = 0.8
+
+-- Which page a description is, ignoring its live details: "ready" for
+-- "ready:false", "prompt:chat_type" for "prompt:chat_type:nil:true".
+function Board.page_kind(id)
+	id = tostring(id or '')
+	return id:match('^prompt:[^:]+') or id:match('^[^:]+') or id
 end
 
 -- Pages that need the player: the board opens itself for these in the hub.
@@ -750,6 +766,13 @@ function Board:render(d)
 	self:clear_dynamic()
 	self.gen = self.gen + 1
 	self.desc, self.rendered = d, d.id
+	-- A different page: ignore presses for a moment, so one meant for the
+	-- previous page (e.g. a vote just as it closed) can't land on this one.
+	local kind = Board.page_kind(d.id)
+	if kind ~= self.page_kind then
+		self.page_kind = kind
+		self.settle_until = self.now() + Board.SETTLE
+	end
 	self.last_attention = d.id -- seen: closing it with B keeps it closed
 	self.stats.builds = self.stats.builds + 1
 	self.log('board: page ' .. tostring(d.id))
@@ -828,6 +851,10 @@ function Board:render(d)
 		local x, y
 		if d.grid or d.compare or d.table then
 			x, y = cx + (i - (nb + 1) / 2) * 440, math.max(top, cy + 200) + 40
+		elseif d.button_cols then
+			local cols = math.min(d.button_cols, nb)
+			local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
+			x, y = cx + (col - (cols - 1) / 2) * 440, math.max(top + 30, cy - 60) + row * 100
 		else
 			x, y = cx, math.max(top + 30, cy - 60) + (i - 1) * 100
 		end
@@ -1029,7 +1056,10 @@ function Board:run()
 			self.log('board: input ' .. tostring(result) .. (allowed and '' or ' (input blocked)')
 				.. (gen ~= self.gen and ' (stale page)' or ''))
 		end
-		if screen.KeepOpen and gen == self.gen and result ~= nil and allowed then
+		-- (B / Cancel only closes or backs out: never held back.)
+		local settling = result ~= nil and result ~= 'Cancel' and self.now() < (self.settle_until or 0)
+		if settling then self.log('board: input ignored (page just changed)') end
+		if screen.KeepOpen and gen == self.gen and result ~= nil and allowed and not settling then
 			if type(result) == 'string' then
 				if result == 'Cancel' then self:act(self.desc.cancel.action) end
 			else

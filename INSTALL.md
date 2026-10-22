@@ -71,7 +71,7 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 - Then you have **2 minutes** in the Crossroads to set your Arcana, familiar and
   aspect (close the board with B; the hint at the bottom of the screen says where
   to reopen it: the Pitch-Black Stone). Walk to the voted route's exit and use it
-  ("Ready to Race"), or press **Ready** on the board. The race starts as soon as
+  ("Ready to Race"), or press **Ready Now** on the board. The race starts as soon as
   everyone is ready, or when the 2 minutes run out, after a 3-2-1.
 - Every racer gets the same fully upgraded profile, kept in memory only: your own
   save is never loaded or written, and it can't earn achievements. It has seen

@@ -20,6 +20,7 @@ RES="${RES:-/X=960 /Y=540}"
 GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /RequireFocusToUpdate=false"
 # COMPETITIVE=1: both clients enter via the title-screen entry (identical maxed profiles).
 # DIVERGE=1: instance B takes the highest-id door and the last boon (A: lowest, first).
+# CHAOS=1: instance B gets a Chaos gate wherever one can appear and takes it (A never does).
 # QUEUE=1: both clients use Find Match instead of a private lobby code.
 # BOARD=1: lobby actions go through the native Race Board (code typed on its keys).
 # CODE=1: both clients enter the same random race code (no host).
@@ -65,6 +66,7 @@ MUT_JSON=""
 for X in A B; do
   PICK=""
   [ "${DIVERGE:-0}" = 1 ] && [ "$X" = B ] && PICK='"door_pick":"highest","boon_pick":"last",'
+  [ "${CHAOS:-0}" = 1 ] && [ "$X" = B ] && PICK='"door_pick":"chaos","force_chaos_door":true,"boon_pick":"last",'
   if [ "$X" = A ]; then ROLE=host; EXTRA='"outcome":"win","clear_screen":true,"win_after_opponent_death":true,"expect":"win","expect_reason":"survivor_finished"'
   else ROLE=join; EXTRA='"outcome":"die","expect":"lose","expect_reason":"survivor_finished"'; fi
   if [ "${SCENARIO:-}" = clear_then_forfeit ]; then
@@ -79,7 +81,7 @@ for X in A B; do
   [ "${CODE:-0}" = 1 ] && ROLE=code
   cat >"$RUN/bot-$X.json" <<JSON
 {"role":"$ROLE","name":"Bot$X","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
- ${BOT_EXTRA:+$BOT_EXTRA,}"code_file":"Z:$TB/run/code","route":"${ROUTE:-underworld}","ready_via_door":${READY_VIA_DOOR:-false},"chat":"gl hf from $X","weapon":"WeaponAxe","keepsake":"BossPreDamageKeepsake",
+ ${BOT_EXTRA:+$BOT_EXTRA,}"code_file":"Z:$TB/run/code","route":"${ROUTE:-underworld}","ready_via_door":${READY_VIA_DOOR:-false},"chat":"gl hf from $X","weapon":"WeaponAxe","keepsake":"${KEEPSAKE:-BossPreDamageKeepsake}",
  "timeout":$((TIMEOUT - 60)),"quit_after":${QUIT_AFTER:-5},"show_ui":${SHOW_UI:-true},"dwell":${DWELL:-0},"expect_overlay":$([ "${OVERLAY:-0}" = 1 ] && echo true || echo false),"use_board":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"expect_results_screen":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"race_code":"$RACE_CODE","mutations":{$MUT_JSON},$COMP_JSON$PICK
  $EXTRA}
 JSON

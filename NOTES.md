@@ -150,6 +150,20 @@ Fixes in `game.lua`:
   `ReachedTrueEnding` (without it the fully-heard story leaves Hecate "missing": no Erebus boss, and a Typhon
   kill locks the Surface). So no god starts locked for one racer and not the other.
 
+**Chaos detours** (0.5.2): a Chaos room counts as one of the biome's rooms in the game itself
+(`GetRunDepth`/`GetBiomeDepth` count all of `RoomHistory`; Chaos rooms have `UsePreviousRoomSet` and no
+`NextRoomSet`, so the biome counter doesn't reset): a racer who detours reaches the shop/miniboss/boss
+one main room sooner, i.e. the Chaos room replaces a main room. The per-depth seeds key on the same
+counter, so the room after a detour is the room the others have at that depth. Two drifts showed up in
+tests with forced Chaos gates (bot.json `force_chaos_door`, `CHAOS=1 scripts/e2e-two-games.sh`) and are
+fixed: (1) `ChooseNextRewardStore` (RunProgress vs MetaProgress pool for a room's doors) nudges its
+chance by the rewards in your history (`CalcMetaProgressRatio`); in races it rolls the plain target ratio
+on the depth's room seed. (2) The skipped main room still counted as unvisited for the detouring racer,
+so it could be offered to them later where the others couldn't get it (rooms don't repeat:
+`MaxAppearancesThisBiome`); room choice now counts every main-path room as visited
+(`with_main_path_visited`). Verified: after two detours, the next rooms (and their encounters) matched the
+other racer's at those depths.
+
 What can still differ, by design: anything a racer's build rules out for them (a god after the 4-god cap, a
 boon they already have, Pom on nothing upgradable) changes that one pick only.
 
@@ -251,6 +265,10 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   block, mouse tether, camera, combat controls, combat UI). Back home with others still running,
   the board opens on "Out of the Race" / "Victory": your result plus every running rival's depth,
   biome and HP, live.
+- **Ready page** (0.5.2): opens by itself after the votes, focused on **Set Up My Run** (closes the
+  board), with **Ready Now** beside it. Two user races started instantly because a confirm press a few
+  seconds after the page opened hit the old focused Ready button. Confirm presses are also ignored for
+  0.8 s after the board switches to a different page (`Board.SETTLE`; B is never held back).
 - **Prep time and routes:** after the votes (route, weapon, keepsake) the server gives 2 minutes
   (`prepMs`, `PREP_SECONDS`) and starts the race when everyone is ready or the time is up. The voted
   route's Crossroads exit (DeathLoopData Hub_PreRun: Underworld door 420947 and Surface 555784 via
