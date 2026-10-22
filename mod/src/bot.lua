@@ -29,6 +29,7 @@
 --   probe_overlay in the competitive Crossroads, open Hell2Modding's overlay and wait for
 --                 a controller press to close it (scripts/e2e-overlay-pad.sh)
 --   change_arcana once in the competitive Crossroads, take one Arcana card off (or put one on)
+--   swap_boon_test in the first room, replace a special boon like a boon choice (HUD icon checks)
 --   preview_split once the race run is live, record a region split by hand (screenshots)
 --   preview_count show this countdown text in the Crossroads (font screenshots)
 --   press_competitive_again  also press the title-screen entry after a quit to the menu
@@ -584,8 +585,55 @@ function Bot:step_wait_run(now, c, st)
 	end
 end
 
+-- swap_boon_test: in the first room, take a special boon, replace it with
+-- another god's the way a boon choice does (HandleUpgradeChoiceSelection's
+-- TraitToReplace path), then hide and show the combat UI like a dialogue.
+-- Logs each step for screenshots. Returns true while it runs.
+function Bot:swap_boon_test(now)
+	local p = self.swap_test
+	if p and p.done then return false end
+	local G = self.game.G
+	local hero = G.CurrentRun and G.CurrentRun.Hero
+	if not hero then return true end
+	if not p then
+		p = { stage = 1, at = now + 2 }
+		self.swap_test = p
+	end
+	if now < p.at then return true end
+	if p.stage == 1 then
+		G.thread(function() G.AddTraitToHero({ TraitName = 'ApolloSpecialBoon', FromLoot = true }) end)
+		self.log('bot: swap test: took ApolloSpecialBoon')
+		p.stage, p.at = 2, now + 3
+	elseif p.stage == 2 then
+		G.thread(function()
+			G.RemoveWeaponTrait('ApolloSpecialBoon')
+			local data = G.GetProcessedTraitData({ Unit = hero, TraitName = 'HeraSpecialBoon', Rarity = 'Common' })
+			G.AddTraitToHero({ TraitData = data, FromLoot = true })
+		end)
+		self.log('bot: swap test: replaced it with HeraSpecialBoon')
+		p.stage, p.at = 3, now + 5
+	elseif p.stage == 3 then
+		local anchors = {}
+		for _, t in ipairs(hero.Traits or {}) do
+			if t.Slot == 'Secondary' then anchors[#anchors + 1] = t.Name .. '=' .. tostring(t.AnchorId) end
+		end
+		self.log('bot: swap test: combat shot now; special slot ' .. table.concat(anchors, ' '))
+		p.stage, p.at = 4, now + 4
+	elseif p.stage == 4 then
+		G.HideCombatUI('RankedRaceSwapTest')
+		self.log('bot: swap test: combat UI hidden')
+		p.stage, p.at = 5, now + 4
+	elseif p.stage == 5 then
+		self.log('bot: swap test: hidden shot now')
+		G.ShowCombatUI('RankedRaceSwapTest')
+		p.done = true
+	end
+	return true
+end
+
 function Bot:step_play(now, c, st)
 	if st.result then return self:go_step('result') end
+	if self.cfg.swap_boon_test and self:swap_boon_test(now) then return end
 	-- race_menu_peek: once, mid-run, open the pause menu's Race Menu and its chat page, then back.
 	if self.cfg.race_menu_peek and not self.peeked and self.rooms_done >= 1 then
 		self.peeked = true

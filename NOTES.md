@@ -246,6 +246,13 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   around the square weapon icons it is `SetScaleX` 1.1 / `SetScaleY` 0.8 and moved up 8 units
   (`Board.WEAPON_FRAME`, measured on screenshots). The shops' `BoonSlotHighlight` is a large
   decorative swoosh, not an icon frame.
+- **Open: boon icons drawn backwards after a slot swap** (user report, Deck 0.5.5): after taking a
+  different god's special (depth 28) and dash (depth 31) boon over the old one, those two HUD icons
+  showed only their empty-slot art in combat and their boon art while the combat UI was hidden
+  (dialogue), many rooms later. The mod's hooks on that path only log. A direct swap
+  (`RemoveWeaponTrait` + `AddTraitToHero`, bot.json `swap_boon_test`) shows the icon correctly in
+  combat and hides it with the UI; the report's swaps went through the boon screen and were then
+  upgraded. Not reproduced yet.
 - **Presence** (0.5.6): the server sends `presence` {online, searching, racing} on hello and when the
   counts change (at most once a second); the board's home and Find Match pages show it. Older
   clients log it as unhandled; older servers never send it.
