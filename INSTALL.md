@@ -69,7 +69,9 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 - Vote on the route (Underworld, Surface or Dream Dive), the weapon and the keepsake (most
   votes wins, ties are drawn at random).
 - Then you have **2 minutes** in the Crossroads to set your Arcana, familiar and
-  aspect (close the board with B; the hint at the bottom of the screen says where
+  aspect. The voted weapon and keepsake are already equipped; other weapons and the
+  keepsake rack stay locked until the race starts, and you can swap keepsakes
+  between regions as usual (close the board with B; the hint at the bottom of the screen says where
   to reopen it: the Pitch-Black Stone). Walk to the voted route's exit and use it
   ("Ready to Race"), or press **Ready Now** on the board. The race starts as soon as
   everyone is ready, or when the 2 minutes run out, after a 3-2-1.

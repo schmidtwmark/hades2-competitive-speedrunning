@@ -24,6 +24,8 @@
 --   race_menu_peek  mid-run, open the Race Menu and its chat page, then go back (screenshots)
 --   shadow_mirror { dx, dy }: also draw our own hero's shadow, offset (size checks)
 --   shadow_scale  override the shadow's scale (size checks)
+--   probe_prep    during the prep time, check the Crossroads set-up before readying
+--                 (race loadout in hand, Arcana screen, aspect swap, locked racks)
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
 
@@ -339,6 +341,10 @@ function Bot:step_lobby(now, c, st)
 		self.board_chatted = true
 		self:queue_press('chat', 'say_' .. tostring(self.cfg.chat_on_board))
 	end
+	if phase == 'ready_check' and self.cfg.probe_prep and not (self.probe and self.probe.done) then
+		self:probe_prep(now)
+		return
+	end
 	if phase == 'ready_check' and not self.readied and not self:wait_dwell('ready', now) then
 		self.readied = true
 		if self.cfg.ready_via_door then
@@ -355,6 +361,88 @@ function Bot:step_lobby(now, c, st)
 				b and string.format('opens=%d builds=%d presses=%d queued=%d', b.stats.opens, b.stats.builds, b.stats.presses, #self.press_queue))
 		end
 		self:go_step('countdown')
+	end
+end
+
+-- probe_prep: before readying, use the Crossroads like a player setting up a
+-- run, one step every few seconds: the race's weapon and keepsake are in hand,
+-- the Arcana screen opens and closes, the race weapon's aspect swaps, and
+-- another weapon's rack and the keepsake rack stay shut.
+function Bot:probe_prep(now)
+	local G, game = self.game.G, self.game
+	local p = self.probe
+	if not p then
+		p = { stage = 1, at = now }
+		self.probe = p
+		if self.board and self.board:is_open() then self.board:close() end
+	end
+	if now < p.at then return end
+	local weapon, keepsake = game:voted_loadout()
+	local hero, GS = G.CurrentRun and G.CurrentRun.Hero, G.GameState
+	local screens = G.ActiveScreens or {}
+	local function next_stage(secs) p.stage, p.at = p.stage + 1, now + secs end
+	if p.stage == 1 then
+		next_stage(3) -- the race weapon's pickup runs in a game thread
+	elseif p.stage == 2 then
+		self:check('prep: race weapon in hand', weapon and hero.Weapons and hero.Weapons[weapon] ~= nil, tostring(weapon))
+		self:check('prep: race keepsake equipped', keepsake ~= nil and GS.LastAwardTrait == keepsake, tostring(GS.LastAwardTrait))
+		local altar = G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[589766]
+		self:check('prep: arcana altar present', altar ~= nil)
+		if altar then
+			G.thread(function()
+				local ok, err = pcall(G.OpenMetaUpgradeCardScreen, altar)
+				if not ok then p.arcana_error = tostring(err) end
+			end)
+		end
+		next_stage(3)
+	elseif p.stage == 3 then
+		local screen = screens.MetaUpgradeCardLayout
+		self:check('prep: arcana screen opens', screen ~= nil and p.arcana_error == nil, p.arcana_error)
+		if screen then G.thread(G.CloseMetaUpgradeCardScreen, screen) end
+		next_stage(3)
+	elseif p.stage == 4 then
+		self:check('prep: arcana screen closes', screens.MetaUpgradeCardLayout == nil)
+		local kit = weapon and G.GetWeaponKit(weapon)
+		if kit then G.thread(G.UseWeaponKit, kit, {}, hero) end
+		next_stage(3)
+	elseif p.stage == 5 then
+		local screen = screens.WeaponUpgradeScreen
+		self:check('prep: race weapon rack opens its aspects', screen ~= nil)
+		p.aspect_from = GS.LastWeaponUpgradeName[weapon]
+		for _, comp in pairs(screen and screen.Components or {}) do
+			if type(comp) == 'table' and comp.WeaponName == weapon and comp.TraitData and comp.TraitData.Name ~= p.aspect_from then
+				p.aspect_to = comp.TraitData.Name
+				G.thread(G.HandleWeaponUpgradeSelection, screen, comp)
+				break
+			end
+		end
+		next_stage(2)
+	elseif p.stage == 6 then
+		self:check('prep: race weapon aspect swaps', p.aspect_to ~= nil and GS.LastWeaponUpgradeName[weapon] == p.aspect_to,
+			tostring(p.aspect_from) .. ' -> ' .. tostring(GS.LastWeaponUpgradeName[weapon]))
+		if screens.WeaponUpgradeScreen then G.thread(G.CloseWeaponUpgradeScreen, screens.WeaponUpgradeScreen) end
+		next_stage(3)
+	elseif p.stage == 7 then
+		self:check('prep: aspect screen closes', screens.WeaponUpgradeScreen == nil)
+		for _, kit in pairs(G.MapState.WeaponKits or {}) do
+			if kit.Name ~= weapon then
+				p.other = kit.Name
+				G.thread(G.UseWeaponKit, kit, {}, hero)
+				break
+			end
+		end
+		next_stage(3)
+	elseif p.stage == 8 then
+		self:check('prep: other weapons stay on the rack', p.other ~= nil and hero.Weapons[p.other] == nil and hero.Weapons[weapon] ~= nil
+			and screens.WeaponUpgradeScreen == nil, tostring(p.other))
+		local id = G.GetIdsByType and G.GetIdsByType({ Name = 'GiftRack' })[1]
+		local rack = id and G.MapState.ActiveObstacles[id]
+		self:check('prep: keepsake rack present', rack ~= nil, tostring(id))
+		if rack then G.thread(G.UseKeepsakeRack, rack, hero) end
+		next_stage(3)
+	else
+		self:check('prep: keepsake rack stays shut', screens.KeepsakeRack == nil and GS.LastAwardTrait == keepsake)
+		p.done = true
 	end
 end
 

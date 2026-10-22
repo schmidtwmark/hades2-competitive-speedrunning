@@ -307,6 +307,16 @@ function Profile.build(G, saved)
 	GS.GamePhaseRunsRemaining = 2
 	GS.NextBiomeStateName = nil
 	summary.saved_arcana = Profile.apply_loadout(G, GS, saved)
+	-- What loading a save adds: DoPatches runs on every map load, but on this
+	-- first one it ran before the profile existed. Without it the Arcana
+	-- screen's layout slots have no art table and the screen errors on open.
+	GS.CurrentMetaUpgradeLayout = GS.CurrentMetaUpgradeLayout or 1
+	GS.SavedMetaUpgradeLayouts = GS.SavedMetaUpgradeLayouts or {}
+	GS.MetaUpgradeLayoutsArt = GS.MetaUpgradeLayoutsArt or {}
+	if G.DoPatches then
+		local ok, err = pcall(G.DoPatches)
+		summary.patched = ok or tostring(err)
+	end
 	return summary
 end
 

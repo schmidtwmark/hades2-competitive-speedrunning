@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.5.2'
+local VERSION = '0.5.3'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))

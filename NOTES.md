@@ -77,6 +77,11 @@ The two save copies differed only by a few test deaths/runs; far-apart saves are
 - With `GameState == nil` the scripts call `StartNewGame(map)`; the mod replaces it with `profile.lua`
   (fresh `GameStateInit` + everything maxed). Verified in game: 6 weapons, 24 aspects rank 5, 33 keepsakes
   level 3, 5 familiars with 45/45 upgrades, 25/25 Arcana at max rank, Grasp 30, Fear 0.
+- `DoPatches` (PatchLogic.lua) runs in `OnPreThingCreation` on every map load, but on the first one it runs
+  before the profile exists. Until 0.5.3 the Arcana altar in that first Crossroads visit hit a script error
+  (`MetaUpgradeCardScreenPresentation.lua:436`, `GameState.MetaUpgradeLayoutsArt` nil, set only by
+  `DoMetaUpgradePatches`) and left the screen stuck open. `Profile.build` now sets the layout tables and
+  calls `DoPatches` itself.
 - No save writes: `GameState.IllegalConversationModification` (RequestSave's own guard) plus hooks on
   `RequestSave`, `ValidateCheckpoint`, `InvalidateCheckpoint` (the last two write `<Profile>.v.sav`'s
   checkpoint-valid byte). Gate `COMPETITIVE=1 scripts/e2e-vs-mock.sh` hashes all 11 profile files before and
@@ -269,6 +274,13 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   board), with **Ready Now** beside it. Two user races started instantly because a confirm press a few
   seconds after the page opened hit the old focused Ready button. Confirm presses are also ignored for
   0.8 s after the board switches to a different page (`Board.SETTLE`; B is never held back).
+- **Race loadout in the Crossroads** (0.5.3): once a weapon or keepsake vote lands, `UseWeaponKit`
+  refuses every other weapon's kit ("Locked" notice) while the voted weapon's kit still opens its
+  aspect screen, and `UseKeepsakeRack` refuses the Crossroads rack (the game's locked-rack shake).
+  Keepsake racks in later regions (`WorldUpgradePostBossGiftRack`) work as usual: only the starting
+  keepsake is the voted one. In competitive mode the voted weapon is picked up (`PickupWeaponKit`)
+  and the keepsake equipped (as `KeepsakeScreenClose` does) as the votes land. `start_race` still
+  forces both at GO, so an older client ends up with the same start.
 - **Prep time and routes:** after the votes (route, weapon, keepsake) the server gives 2 minutes
   (`prepMs`, `PREP_SECONDS`) and starts the race when everyone is ready or the time is up. The voted
   route's Crossroads exit (DeathLoopData Hub_PreRun: Underworld door 420947 and Surface 555784 via

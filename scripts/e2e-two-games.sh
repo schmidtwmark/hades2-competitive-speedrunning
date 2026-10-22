@@ -28,6 +28,7 @@ GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /Require
 #   screen; B is told mid-run, keeps going two more rooms, then forfeits.
 # ROUTE=surface|dream|underworld: what both bots vote for (default underworld).
 # READY_VIA_DOOR=true: bots ready up by using the route's exit, not the board's Ready.
+# PROBE_PREP=1: A checks the Crossroads set-up during the prep time (bot.lua probe_prep).
 # BOT_EXTRA='"welcome_dwell":5': extra bot.json fields for both bots.
 # MOCKS=n: n mock racers (on this Mac) also join A's private lobby, and A starts
 #   once all 2+n are in. The mocks fall early (MOCK_DIE_AFTER s into the race,
@@ -67,6 +68,7 @@ for X in A B; do
   PICK=""
   [ "${DIVERGE:-0}" = 1 ] && [ "$X" = B ] && PICK='"door_pick":"highest","boon_pick":"last",'
   [ "${CHAOS:-0}" = 1 ] && [ "$X" = B ] && PICK='"door_pick":"chaos","force_chaos_door":true,"boon_pick":"last",'
+  [ "${PROBE_PREP:-0}" = 1 ] && [ "$X" = A ] && PICK="$PICK"'"probe_prep":true,'
   if [ "$X" = A ]; then ROLE=host; EXTRA='"outcome":"win","clear_screen":true,"win_after_opponent_death":true,"expect":"win","expect_reason":"survivor_finished"'
   else ROLE=join; EXTRA='"outcome":"die","expect":"lose","expect_reason":"survivor_finished"'; fi
   if [ "${SCENARIO:-}" = clear_then_forfeit ]; then
@@ -136,6 +138,9 @@ for ((i = 1; i <= MOCKS; i++)); do  # not seq: macOS `seq 1 0` counts down
   grep -q '^RESULT: {"ok":true' "$RUN/mock-$i.log" || ok=0
 done
 for X in A B; do
+  if grep -q "Script error" "$RUN/$X-LogOutput.log" 2>/dev/null; then
+    echo "instance $X hit game script errors:"; grep -A 3 "Script error" "$RUN/$X-LogOutput.log" | grep -v "^\[" | head -6; ok=0
+  fi
   if grep -q "ui: \|frame error" "$RUN/$X-ranked.log" 2>/dev/null; then
     echo "instance $X logged UI/frame errors:"; grep "ui: \|frame error" "$RUN/$X-ranked.log" | head -5; ok=0
   fi

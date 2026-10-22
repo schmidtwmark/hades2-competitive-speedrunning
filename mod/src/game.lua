@@ -33,7 +33,7 @@ local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', '
 	'UnlockAchievement', 'CheckProgressAchievements', 'CheckAchievement', 'ChooseLoot', 'FillInShopOptions',
 	'SetTraitsOnLoot', 'HandleBreakableSwap', 'CheckMoneyDrop', 'ProcessObjectValueOptions',
 	'CheckChallengeSwitchItemValidity', 'CheckPlayerOnFirePowers', 'ChooseSpell', 'CreateSpellButtons',
-	'IsSecretDoorEligible', 'ChooseNextRewardStore' }
+	'IsSecretDoorEligible', 'ChooseNextRewardStore', 'UseWeaponKit', 'UseKeepsakeRack' }
 
 -- Shadow animations for hero actions whose fire graphic isn't the visible move.
 local ACTION_ANIMS = { WeaponBlink = 'MelinoeDashStart', WeaponSprint = 'MelinoeSprint' }
@@ -1192,6 +1192,7 @@ function Game:verify_competitive_profile()
 	check('all arcana at max rank', cards > 0 and maxed == cards, string.format('%d/%d cards', maxed, cards))
 	local grasp = G.GetMaxMetaUpgradeCost and G.GetMaxMetaUpgradeCost()
 	check('max grasp', grasp == 30, 'grasp=' .. tostring(grasp))
+	check('arcana layouts ready', type(GS.MetaUpgradeLayoutsArt) == 'table' and type(GS.SavedMetaUpgradeLayouts) == 'table')
 	check('no fear', next(GS.ShrineUpgrades or {}) == nil)
 	return checks
 end
@@ -1332,6 +1333,78 @@ end
 function Game:hook_UseDreamRunDoor(base, usee, args, ...)
 	if self:race_door('dream') then return end
 	return base(usee, args, ...)
+end
+
+-- The race's loadout in the Crossroads ----------------------------------------------
+-- Once voted, the weapon racks hand out only the race's weapon (its aspects
+-- stay free) and the keepsake rack is closed: every racer starts with the
+-- voted keepsake. Keepsake racks between regions work as usual.
+
+-- The voted weapon and keepsake while a race is being set up or run (nil
+-- before each vote and outside races).
+function Game:voted_loadout()
+	local c = self.client
+	local phase = c and c:phase()
+	if not phase or phase == 'waiting' or phase == 'finished' then return nil, nil end
+	local function pick(kind)
+		local v = c.state.vote_results[kind]
+		local id = v and v.selected
+		if id and id ~= '' then return id end
+		return nil
+	end
+	return pick('weapon'), pick('keepsake')
+end
+
+function Game:hook_UseWeaponKit(base, kit, args, user)
+	local weapon = self:in_hub() and self:voted_loadout()
+	if weapon and kit and kit.Name ~= weapon then
+		self:notice('Locked', 'This race uses the ' .. self:display_name(weapon))
+		return
+	end
+	return base(kit, args, user)
+end
+
+function Game:hook_UseKeepsakeRack(base, rack, user)
+	local _, keepsake = self:voted_loadout()
+	if keepsake and self:in_hub() then
+		if self:fn('CannotUseKeepsakeRackPresentation') and rack then
+			self:spawn(self.G.CannotUseKeepsakeRackPresentation, rack.ObjectId)
+		end
+		self:notice('Locked', 'This race starts with ' .. self:display_name(keepsake))
+		return
+	end
+	return base(rack, user)
+end
+
+-- Competitive Crossroads: put the voted weapon and keepsake in the racer's
+-- hands as the votes land, the way the racks would (PickupWeaponKit,
+-- KeepsakeScreenClose), so the aspect they pick is for the race's weapon.
+function Game:equip_voted_loadout()
+	if not (self:competitive_active() and self:in_hub()) then
+		self.equipping = nil
+		return
+	end
+	local weapon, keepsake = self:voted_loadout()
+	local G = self.G
+	local hero, GS = G.CurrentRun and G.CurrentRun.Hero, G.GameState
+	if not (hero and GS) then return end
+	if not weapon then self.equipping = nil end
+	if weapon and hero.Weapons and hero.Weapons[weapon] == nil and self.equipping ~= weapon then
+		local kit = self:call('GetWeaponKit', weapon)
+		if kit and self:fn('PickupWeaponKit') then
+			self.equipping = weapon
+			self.log('game: equipping the race weapon ' .. weapon)
+			self:spawn(G.PickupWeaponKit, kit, {})
+		end
+	end
+	if keepsake and GS.LastAwardTrait ~= keepsake and self:fn('EquipKeepsake') then
+		self.log('game: equipping the race keepsake ' .. keepsake)
+		local old = GS.LastAwardTrait
+		local readd = old and self:call('UnequipKeepsake', hero, old)
+		GS.LastAwardTrait = keepsake
+		self:call('EquipKeepsake', hero, keepsake, { FromLoot = true })
+		if readd ~= nil then self:call('TraitUIAdd', readd) end
+	end
 end
 
 -- The prep time's prompt on the voted route's door: "{I} Ready to Race".
@@ -1541,6 +1614,11 @@ function Game:update()
 	pcall(self.diagnose, self, self.now())
 	self:in_hub_now()
 	pcall(self.update_door_prompts, self)
+	local ok, err = pcall(self.equip_voted_loadout, self)
+	if not ok and self.now() - (self.last_equip_error or 0) >= 10 then
+		self.last_equip_error = self.now()
+		self.log('game: equipping the race loadout failed: ' .. tostring(err))
+	end
 	-- One timer: the game's own run timer pauses for menus and boon choices,
 	-- so in competitive mode it is hidden and the race clock is the only one.
 	if self:competitive_active() and self.G.SetConfigOption and self.now() - (self.last_timer_block or 0) >= 1 then
