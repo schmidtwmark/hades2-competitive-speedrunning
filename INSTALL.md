@@ -111,8 +111,21 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 
 ## Update
 
-Get the new files (`git pull`, or a fresh ZIP) and run the installer again. Your
-name and settings are kept.
+The Race Board says when a newer Ranked Race is out (**How to Update** on its home
+page). Quit Hades II, then run one command; it downloads the latest release and
+runs the installer again. Your racer name and settings are kept.
+
+- **Linux / Steam Deck** (on the Deck: Desktop Mode → Konsole):
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.sh | bash
+  ```
+- **Windows** (PowerShell):
+  ```powershell
+  irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex
+  ```
+
+Or by hand: get the new files (`git pull`, or a fresh ZIP) and run the installer
+again.
 
 ## Uninstall
 

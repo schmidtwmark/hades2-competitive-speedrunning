@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { compatibility, mismatchMessage, modTooOld, parseVersion } from "../src/versions.js";
+import { compatibility, LATEST_MOD_VERSION, MIN_MOD_VERSION, mismatchMessage, modTooOld, parseVersion } from "../src/versions.js";
 import { TestClient, makeServer } from "./helpers.js";
 
 const SEP23 = 1790167264; // 2026-09-23 (the tested build)
@@ -28,6 +29,21 @@ describe("version rules", () => {
     const them = { mod: "0.3.0", gameBuild: OCT15 };
     assert.match(mismatchMessage({ what: "game", older: "a" }, me, them, "Zag", true), /update Hades II in Steam \(your game build 2026-09-23 is older than theirs, 2026-10-15\)/);
     assert.match(mismatchMessage({ what: "game", older: "a" }, them, me, "Mel", false), /they need to update Hades II/);
+  });
+});
+
+describe("the latest release", () => {
+  it("is the mod's own version, and no older than the minimum", () => {
+    const manifest = JSON.parse(readFileSync(new URL("../../../mod/src/manifest.json", import.meta.url) /* from dist/test */, "utf8"));
+    assert.equal(LATEST_MOD_VERSION, manifest.version_number, "bump LATEST_MOD_VERSION with the mod");
+    assert.equal(modTooOld(LATEST_MOD_VERSION, MIN_MOD_VERSION), false);
+  });
+
+  it("is in every welcome", () => {
+    const { server } = makeServer({ latestModVersion: "9.9.9" });
+    const c = new TestClient(server, "A");
+    c.hello();
+    assert.equal(c.last("welcome").latest_mod, "9.9.9");
   });
 });
 

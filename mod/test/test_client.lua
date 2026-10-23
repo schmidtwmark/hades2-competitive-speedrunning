@@ -373,3 +373,16 @@ T.case('create_lobby asks for a solo run or a house bot; add_bot', function()
 	c:add_bot()
 	T.eq(f.last('add_bot').type, 'add_bot')
 end)
+
+T.case('update_available: only a newer release than ours, compared by number', function()
+	local c, f = make()
+	c.version = '0.6.0'
+	T.eq(c:update_available(), nil, 'nothing known yet')
+	for latest, want in pairs({ ['0.6.1'] = '0.6.1', ['0.6.0'] = false, ['0.5.9'] = false, ['0.10.0'] = '0.10.0', ['1.0.0'] = '1.0.0' }) do
+		f.push({ type = 'welcome', id = 'p1', token = 't', resumed = false, latest_mod = latest })
+		c:update()
+		T.eq(c:update_available(), want or nil, latest)
+	end
+	c.version = 'dev'
+	T.eq(c:update_available(), nil, 'a dev build never nags')
+end)

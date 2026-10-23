@@ -78,6 +78,13 @@ Board.WELCOME_LINES = {
 }
 
 -- Where each route starts in the Crossroads (using it marks you ready).
+-- How to update: the repository and the one-line updaters (install/update.*).
+Board.UPDATE = {
+	url = 'github.com/schmidtwmark/hades2-ranked-race',
+	linux = 'curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.sh | bash',
+	windows = 'irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex',
+}
+
 Board.ROUTE_START = { underworld = 'the stairs down', surface = 'the path to the Surface', dream = 'the Dream Dive' }
 Board.ROUTE_NAMES = { underworld = 'Underworld', surface = 'Surface', dream = 'Dream Dive' }
 
@@ -182,7 +189,7 @@ function Board.mismatch_lines(m)
 	local rival = Board.safe(m.rival or 'your rival')
 	local thing = m.what == 'game' and 'Hades II' or 'Ranked Race'
 	local how = m.what == 'game' and 'Update it in Steam: Library -> Hades II -> Update.'
-		or 'Update it: git pull in the mod folder, then run the installer again.'
+		or 'Quit the game and run one command: see How to Update.'
 	if m.code == 'update_required' then
 		return { { text = 'This Ranked Race is out of date', color = RED },
 			{ text = 'It can no longer race on this server.' }, { text = how, color = GREY } }
@@ -220,6 +227,8 @@ function Board.view(c, ui, now, names)
 	if ui.prompt == 'race' then
 		d.id, d.title = 'prompt:race', 'Race Menu'
 		line('Message the race, or give up your run.', GREY)
+		local latest = c:update_available()
+		if latest then line('Ranked Race ' .. latest .. ' is out: update after the race (Race Board, How to Update).', GOLD) end
 		button('chat', 'Chat', 'chat')
 		button('forfeit', 'Forfeit Race', 'race_forfeit')
 		button('keep', 'Back to the Race', 'prompt_cancel')
@@ -308,6 +317,24 @@ function Board.view(c, ui, now, names)
 			d.id = d.id .. (full and ':full' or '')
 			return d
 		end
+		-- Older than the server's latest release, or refused for it.
+		local latest = c:update_available()
+		local mm = st.mismatch
+		local blocked = mm and mm.what ~= 'game' and (mm.code == 'update_required' or mm.who == 'you' or mm.who == 'both')
+		if ui.page == 'update' then
+			d.id, d.title = 'update', 'Update Ranked Race'
+			line(latest and ('Version ' .. latest .. ' is out (you have ' .. tostring(c.version) .. ').') or 'Get the latest Ranked Race.', GOLD)
+			line('Quit Hades II, then run one command:')
+			line('Steam Deck / Linux (on the Deck: Desktop Mode, then Konsole):', GREY)
+			d.lines[#d.lines + 1] = { text = Board.UPDATE.linux, size = 18, width = 1100 }
+			line('Windows (PowerShell):', GREY)
+			d.lines[#d.lines + 1] = { text = Board.UPDATE.windows, size = 18, width = 1100 }
+			line('Both are on ' .. Board.UPDATE.url .. ', under Updating.', GREY)
+			line('Your racer name and settings stay.', GREY)
+			button('back', 'Back', 'home')
+			d.cancel = { action = 'home', label = '{CN} Back' }
+			return d
+		end
 		if ui.page == 'practice' then
 			d.id, d.title = 'practice', 'Practice'
 			line('Race a bot: it follows your votes, reports its rooms and never clears first.')
@@ -320,6 +347,10 @@ function Board.view(c, ui, now, names)
 		end
 		d.id, d.title = 'home', 'Competitive Speedrun'
 		line('Racing as ' .. Board.safe(c.name))
+		if latest then
+			line('Update available: Ranked Race ' .. latest .. ' (you have ' .. tostring(c.version) .. ').', GOLD)
+			d.id = 'home:update'
+		end
 		if st.mismatch then
 			for _, l in ipairs(Board.mismatch_lines(st.mismatch)) do line(l.text, l.color) end
 			d.id = 'home:mismatch'
@@ -335,6 +366,11 @@ function Board.view(c, ui, now, names)
 		button('join_page', 'Race by Code', 'join_page')
 		button('practice', 'Practice', 'practice')
 		button('about', 'About', 'about')
+		if latest or blocked then
+			button('update', 'How to Update', 'update_page')
+			d.button_cols = 2
+			if blocked then d.focus = 'update' end
+		end
 		return d
 	end
 
@@ -638,6 +674,8 @@ function Board:act(action, arg)
 		c:cancel_match()
 	elseif action == 'create' then
 		c:create_lobby()
+	elseif action == 'update_page' then
+		ui.page = 'update'
 	elseif action == 'practice' then
 		ui.page = 'practice'
 	elseif action == 'race_bot' then
@@ -823,7 +861,7 @@ function Board:render(d)
 	for i, l in ipairs(d.lines) do
 		local big = i == 1 and l.color == GOLD
 		self:label('Line' .. i, cx, cy - 262 + (i - 1) * 40 + (big and -6 or 0), l.text,
-			big and 'P22UndergroundSCMedium' or 'LatoMedium', big and 34 or 24, l.color or BODY, { Width = 900 })
+			big and 'P22UndergroundSCMedium' or 'LatoMedium', l.size or (big and 34 or 24), l.color or BODY, { Width = l.width or 900 })
 	end
 
 	local focus_id

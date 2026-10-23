@@ -155,7 +155,8 @@ export interface RaceSetup {
 }
 
 export type ServerMessage =
-  | { type: "welcome"; id: string; token: string; protocol: number; server_time: number; resumed: boolean }
+  /** latest_mod: the newest Ranked Race release (older clients show how to update). */
+  | { type: "welcome"; id: string; token: string; protocol: number; server_time: number; resumed: boolean; latest_mod: string }
   | { type: "lobby_created"; code: string }
   | { type: "queued"; waiting: number }
   | { type: "match_cancelled" }

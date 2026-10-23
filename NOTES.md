@@ -203,6 +203,13 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
+- **Updates** (0.6.0): `welcome` carries `latest_mod` (`LATEST_MOD_VERSION` in
+  `server/src/versions.ts`; a server test keeps it equal to `mod/src/manifest.json`, so bump
+  both together). A client older than that shows "Update available" on the board's home page,
+  a line in the in-run Race Menu, and a How to Update page with the one-line updaters
+  (`install/update.sh`: `curl ... | bash`; `install/update.ps1`: `irm ... | iex`). They
+  refuse while Hades II runs, download the main branch from codeload.github.com and run the
+  installer, which keeps the racer name. The mod itself downloads and runs nothing.
 - **Practice** (0.6.0): `create_lobby` with `solo` starts voting at once with one racer (the
   minimum for votes, ready and rematch is one; nobody can join). `bot` (or `add_bot` in a
   private lobby still waiting) adds a house bot: a session with no transport whose

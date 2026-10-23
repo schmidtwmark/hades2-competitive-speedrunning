@@ -7,6 +7,12 @@
 /** Oldest mod version this server accepts (older clients speak another protocol). */
 export const MIN_MOD_VERSION = "0.6.0";
 
+/**
+ * The newest mod release (mod/src/manifest.json; a test keeps them equal).
+ * Clients older than this offer the player the update command.
+ */
+export const LATEST_MOD_VERSION = "0.6.0";
+
 export interface ClientVersions {
   /** Ranked Race version, e.g. "0.5.0" (anything unparsable counts as unknown). */
   mod: string | null;

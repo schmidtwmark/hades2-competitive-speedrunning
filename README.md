@@ -30,6 +30,11 @@ Deck) installs the mod loader, its dependencies and the mod; then set one Steam
 launch option and pick **Play Competitive Speedrun** on the title screen. It also
 has step-by-step instructions for an AI agent installing it for you.
 
+**Updating** (with the game closed; your name and settings stay):
+
+- Linux / Steam Deck: `curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.sh | bash`
+- Windows (PowerShell): `irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex`
+
 Competitive mode gives both players the same fully maxed profile (every weapon, aspect, keepsake,
 familiar and Arcana card at max rank, Grasp 30, Fear 0) built in memory; it never reads or writes
 your saves. Each depth has the same room and enemies for both players whatever doors and boons they

@@ -25,7 +25,7 @@ import {
   type RunStats,
   VOTE_ORDER,
 } from "./protocol.js";
-import { type ClientVersions, compatibility, MIN_MOD_VERSION, type Mismatch, mismatchMessage, modTooOld, tooOldMessage } from "./versions.js";
+import { type ClientVersions, compatibility, LATEST_MOD_VERSION, MIN_MOD_VERSION, type Mismatch, mismatchMessage, modTooOld, tooOldMessage } from "./versions.js";
 
 export interface Scheduler {
   now(): number;
@@ -58,6 +58,8 @@ export interface ServerOptions {
   idleLobbyMs: number;
   /** Oldest mod version accepted (default MIN_MOD_VERSION). */
   minModVersion?: string;
+  /** Newest mod release, told to clients (default LATEST_MOD_VERSION). */
+  latestModVersion?: string;
   /** Racers per private lobby (default 5). */
   maxPlayers?: number;
   /** Racers per Find Match lobby (default 2; more race together through a private lobby). */
@@ -358,6 +360,7 @@ export class RaceServer {
       protocol: PROTOCOL_VERSION,
       server_time: this.opts.scheduler.now(),
       resumed,
+      latest_mod: this.opts.latestModVersion ?? LATEST_MOD_VERSION,
     };
   }
 

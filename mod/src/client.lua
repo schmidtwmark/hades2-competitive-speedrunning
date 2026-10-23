@@ -183,6 +183,21 @@ function Client:ready(flag)
 	return self:send(msg)
 end
 
+local function semver(v)
+	local a, b, c = tostring(v or ''):match('^(%d+)%.(%d+)%.(%d+)')
+	if a then return { tonumber(a), tonumber(b), tonumber(c) } end
+end
+
+-- The newer release the server knows of, or nil when we're current (or a dev build).
+function Client:update_available()
+	local have, latest = semver(self.version), semver(self.state.latest_mod)
+	if not (have and latest) then return nil end
+	for i = 1, 3 do
+		if latest[i] ~= have[i] then return latest[i] > have[i] and self.state.latest_mod or nil end
+	end
+	return nil
+end
+
 -- Whether we are marked ready in the lobby.
 function Client:is_ready()
 	local l = self.state.lobby
@@ -382,6 +397,7 @@ local handlers = {}
 function handlers.welcome(c, m)
 	c.state.id = m.id
 	c.state.token = m.token
+	c.state.latest_mod = m.latest_mod -- the newest release (0.6.0 servers)
 	c.reconnect_delay = RECONNECT_MIN
 	if not m.resumed then
 		-- Server doesn't know us (fresh session or grace expired): local lobby state is stale.
