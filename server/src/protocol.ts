@@ -27,6 +27,15 @@ export interface BuildEntry {
 /** Per-run numbers for the results screen (damage dealt/taken, kills, ...). Opaque to the server. */
 export type RunStats = Record<string, number>;
 
+/** The store a player's account is on. */
+export type Platform = "steam" | "epic";
+
+/** One region split of a clear: the region's name and the race time (seconds) it ended at. */
+export interface Split {
+  name: string;
+  time: number;
+}
+
 export interface Progress {
   room: string;
   biome?: string;
@@ -56,9 +65,15 @@ export interface Ghost {
 }
 
 export type ClientMessage =
-  /** version: the mod's version; game_build: the Hades II executable's link time (Unix seconds). */
-  | { type: "hello"; name: string; version?: string; token?: string; game_build?: number }
+  /**
+   * version: the mod's version; game_build: the Hades II executable's link time (Unix seconds);
+   * platform / platform_id: the store account (SteamID64 in decimal, or the Epic account id),
+   * the player's key for personal bests. Self-reported: not verified yet.
+   */
+  | { type: "hello"; name: string; version?: string; token?: string; game_build?: number; platform?: Platform; platform_id?: string }
   | { type: "create_lobby" }
+  /** The store account, found after hello (see hello); name: the store name, used from the next lobby on. */
+  | { type: "identify"; platform?: Platform; platform_id?: string; name?: string }
   | { type: "find_match" }
   | { type: "cancel_match" }
   /** create: if no lobby has this code yet, open one under it and wait (both racers can type an agreed code). */
@@ -74,7 +89,7 @@ export type ClientMessage =
    */
   | { type: "ready"; ready?: boolean }
   | ({ type: "progress_update" } & Progress)
-  | { type: "run_complete"; time: number; victory: boolean; stats?: RunStats; build?: BuildEntry[] }
+  | { type: "run_complete"; time: number; victory: boolean; stats?: RunStats; build?: BuildEntry[]; splits?: Split[] }
   | ({ type: "ghost" } & Ghost)
   /** Give up the run: a DNF, exactly like dying (the rival still has to finish to win). */
   | { type: "forfeit"; stats?: RunStats; build?: BuildEntry[] }
@@ -125,6 +140,8 @@ export interface PlayerSummary {
   rematch: boolean;
   /** A house bot (add_bot), not a person. */
   bot: boolean;
+  /** Personal best clear per route (official seconds), for players with a store account. */
+  best: Record<string, number>;
 }
 
 /** Who a relayed message is about (races have up to five racers). */
@@ -227,6 +244,26 @@ export class ProtocolError extends Error {
   }
 }
 
+/** A store account: Steam ids are decimal SteamID64s, Epic ids hex. Anything else is dropped. */
+function platformId(o: Record<string, unknown>): { platform?: Platform; platform_id?: string } {
+  const id = typeof o.platform_id === "string" ? o.platform_id : "";
+  if (o.platform === "steam" && /^\d{1,20}$/.test(id)) return { platform: "steam", platform_id: id };
+  if (o.platform === "epic" && /^[0-9a-f]{8,64}$/.test(id)) return { platform: "epic", platform_id: id };
+  return {};
+}
+
+function optSplits(o: Record<string, unknown>): Split[] | undefined {
+  const v = o.splits;
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === "object" && !Array.isArray(v) && Object.keys(v as object).length === 0) return [];
+  if (!Array.isArray(v) || v.length > 16) throw new ProtocolError("bad_field", "field 'splits' must be a list (max 16)");
+  return v.map((e) => {
+    if (typeof e !== "object" || e === null) throw new ProtocolError("bad_field", "splits must be objects");
+    const r = e as Record<string, unknown>;
+    return { name: str(r, "name", 40), time: num(r, "time") };
+  });
+}
+
 /** A race log line: a JSON object of at most MAX_LOG_ENTRY characters. */
 export const MAX_LOG_ENTRY = 8192;
 function logEntry(o: Record<string, unknown>): Record<string, unknown> {
@@ -320,9 +357,12 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         version: optStr(o, "version"),
         token: optStr(o, "token", 128),
         game_build: optNum(o, "game_build"),
+        ...platformId(o),
       };
     case "ready":
       return { type, ...(o.ready === false ? { ready: false } : {}) };
+    case "identify":
+      return { type, ...platformId(o), ...(typeof o.name === "string" ? { name: str(o, "name", 32) } : {}) };
     case "create_lobby":
     case "find_match":
     case "cancel_match":
@@ -367,7 +407,7 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         t: num(o, "t"),
       };
     case "run_complete":
-      return { type, time: num(o, "time"), victory: bool(o, "victory"), stats: optStats(o), build: optBuild(o) };
+      return { type, time: num(o, "time"), victory: bool(o, "victory"), stats: optStats(o), build: optBuild(o), splits: optSplits(o) };
     case "race_log":
       return { type, race_id: num(o, "race_id"), entry: logEntry(o) };
     case "chat":

@@ -27,6 +27,9 @@ function Client.new(opts)
 	c.port = opts.port or 7777
 	c.name = opts.name or 'Player'
 	c.version = opts.version or 'dev'
+	-- identify(): the store identity { platform, id, name } (identity.lua), or nil.
+	-- Its name replaces the configured one unless fixed_name (test bots).
+	c.identify = opts.identify
 	c.on = opts.on or {}
 	c.want_connected = false
 	c.next_reconnect = 0
@@ -105,8 +108,13 @@ function Client:update()
 		if status == 'connected' and not self.hello_sent then
 			self.hello_sent = true
 			self.state.conn = 'connected'
+			local ok, who = pcall(function() return self.identify and self.identify() end)
+			if not ok then self.log('identity failed: ' .. tostring(who)) end
+			who = ok and type(who) == 'table' and who or nil
+			if who and who.name and not self.fixed_name then self.name = who.name end
+			self.identity = who
 			self:send({ type = 'hello', name = self.name, version = self.version, token = self.state.token,
-				game_build = self.game_build })
+				game_build = self.game_build, platform = who and who.platform, platform_id = who and who.id })
 		end
 		for _, line in ipairs(lines or {}) do
 			local ok, msg = pcall(self.json.decode, line)
@@ -172,6 +180,15 @@ function Client:vote(phase, choice)
 	local ok = self:send({ type = 'vote_' .. phase, [phase] = choice })
 	if ok and self.state.vote and self.state.vote.phase == phase then self.state.vote.mine = choice end
 	return ok
+end
+
+-- The store identity found after hello (identity.lua): the server takes it as
+-- this session's player key, and its name if we aren't in a lobby.
+function Client:send_identity(who)
+	if not (type(who) == 'table' and who.platform and who.id) then return false end
+	self.identity = who
+	if who.name and not self.fixed_name then self.name = who.name end
+	return self:send({ type = 'identify', platform = who.platform, platform_id = who.id, name = not self.fixed_name and who.name or nil })
 end
 
 -- Waiting: ready to vote (false takes it back). Ready check: ready for the start.
@@ -279,12 +296,14 @@ function Client:report_ghost(g)
 		act = g.act, paused = g.paused or nil, t = self:race_time() })
 end
 
-function Client:report_complete(victory, time, stats, build)
+-- splits: a clear's region splits { { name, time }, ... } (the server keeps the
+-- racer's personal best with them).
+function Client:report_complete(victory, time, stats, build, splits)
 	if not self:racing() or self.state.race.completed then return false end
 	self:_flush_progress(self.now())
 	self.state.race.completed = { victory = victory, time = time or self:race_time() }
 	return self:send({ type = 'run_complete', victory = victory and true or false, time = self.state.race.completed.time,
-		stats = stats, build = build })
+		stats = stats, build = build, splits = splits })
 end
 
 -- queries -----------------------------------------------------------------------

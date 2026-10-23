@@ -907,6 +907,15 @@ function Game:on_room_start(run, room)
 	end
 end
 
+-- This run's region splits for the server: { { name, time }, ... }.
+function Game:split_list()
+	local sp = self.race and self.race.splits
+	if not (sp and sp.times) then return nil end
+	local out = {}
+	for i, t in ipairs(sp.times) do out[i] = { name = tostring(sp.names and sp.names[i] or i), time = t } end
+	return out
+end
+
 -- The run is cleared: the last split, the PB kept if this beat it, and a line
 -- for the results page.
 function Game:finish_splits()
@@ -1008,7 +1017,7 @@ function Game:hook_RecordRunCleared(base, ...)
 		self.race.cleared = true
 		self.log('game: race run cleared')
 		pcall(self.finish_splits, self)
-		if self.client then self.client:report_complete(true, nil, self:run_stats(), self:build_list()) end
+		if self.client then self.client:report_complete(true, nil, self:run_stats(), self:build_list(), self:split_list()) end
 	end
 	return res
 end

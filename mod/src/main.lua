@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.6.2'
+local VERSION = '0.6.3'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -36,6 +36,7 @@ local Board = import('board.lua')
 local RaceLog = import('racelog.lua')
 local Banner = import('banner.lua')
 local ChatFeed = import('chatfeed.lua')
+local Identity = import('identity.lua')
 
 -- logging: H2M's log plus our own file, flushed per line -----------------------
 
@@ -150,9 +151,20 @@ local races_dir = data_dir .. '/races'
 if rom.path and rom.path.create_directory then pcall(rom.path.create_directory, races_dir) end
 game.racelog = RaceLog.new({ dir = races_dir, json = json, now = socket.gettime, log = log })
 
+local store_identity -- read when first needed: Steam is up by the first hello
 local client = Client.new({
 	json = json, transport = Net.new(socket, log), now = socket.gettime, log = log,
 	host = config.server_host, port = config.server_port, name = config.player_name, version = VERSION,
+	-- Steam / Epic: the racer's store name and a player key that outlives reinstalls.
+	identify = function()
+		if not store_identity then
+			store_identity = Identity.read(rom, log)
+			if store_identity then
+				log('identity: ' .. store_identity.platform .. ' ' .. store_identity.id .. ' ' .. tostring(store_identity.name))
+			end
+		end
+		return store_identity
+	end,
 	on = {
 		race_start = function(race) game:prepare_race(race) end,
 		go = function(race) game:start_race(race) end,
@@ -258,6 +270,11 @@ local function competitive_arrival()
 	competitive_arrived = true
 	log('competitive: in the hub')
 	if client.state.conn == 'disconnected' and not client.want_connected then client:connect() end
+	-- Steam is surely up by now; a hello sent earlier went without the identity.
+	if client.identify and not client.identity and client.state.conn == 'connected' then
+		local who = client.identify()
+		if who then client:send_identity(who) end
+	end
 end
 
 -- F8 shows the debug window, through the game's own keybinds: a real key

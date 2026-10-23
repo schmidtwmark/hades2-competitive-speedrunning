@@ -693,3 +693,19 @@ T.case('board: labels too long for a button stretch it, short ones leave it alon
 		T.truthy(Board.BUTTON_WIDTH * Board.button_stretch(line, 22, 1.0) < 450, line)
 	end
 end)
+
+T.case('board: the route vote shows every racer\'s personal best on each route, fastest first', function()
+	local c, f, b = make()
+	local two = { { id = 'p1', name = 'Mel', best = { underworld = 1862.4, surface = 2400 } },
+		{ id = 'p2', name = 'Zag', best = { underworld = 1745.9 } } }
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'voting_route', you = 'p1', players = two })
+	f.push({ type = 'vote_phase', phase = 'route', timer = 15,
+		options = { { id = 'underworld', name = 'Underworld' }, { id = 'surface', name = 'Surface' }, { id = 'dream', name = 'Dream Dive' } } })
+	local d = view(c, b)
+	T.eq(d.lines[3].text, 'Best on Underworld:  Zag 29:05   You 31:02')
+	T.eq(d.lines[4].text, 'Best on Surface:  You 40:00')
+	T.eq(#d.lines, 4, 'no line for a route nobody has cleared')
+	two[1].best, two[2].best = {}, nil
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'voting_route', you = 'p1', players = two })
+	T.eq(view(c, b).lines[3].text, 'Personal bests show here once racers clear a route.')
+end)

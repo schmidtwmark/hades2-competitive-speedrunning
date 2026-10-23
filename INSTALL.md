@@ -33,8 +33,10 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
      bash install/install.sh --name "Your Name"
      ```
 
-   `--name` / `-Name` is the name your rival sees (1–24 letters, digits, spaces
-   or `_ . ' -`); without it you are "Melinoe 123". If the game isn't found,
+   Your rivals see your Steam name (or your Epic display name), and your
+   personal bests are kept with that account on the race server.
+   `--name` / `-Name` (1–24 letters, digits, spaces or `_ . ' -`) is only used
+   if the game can't tell who you are; without it you are "Melinoe 123". If the game isn't found,
    pass its folder: `--game-dir "/path/to/Hades II"` / `-GameDir "D:\...\Hades II"`
    (Steam → Hades II → ⚙ → Manage → Browse local files shows it).
    `--dry-run` / `-DryRun` shows what would happen without changing anything.
@@ -69,6 +71,8 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
 - **Bots**: in a private race, **Add Bot** adds the server's bot. It follows your
   votes, shows its progress like a rival and never clears first, so a private race
   with a bot is also how to practice on your own.
+- The route vote shows everyone's personal best on each route (fastest clear, kept by
+  the race server per Steam / Epic account, so reinstalling doesn't lose it).
 - Vote on the route (Underworld, Surface or Dream Dive), the weapon and the keepsake (most
   votes wins, ties are drawn at random). Each vote shows what the earlier ones picked,
   so you know the weapon when you choose a keepsake.

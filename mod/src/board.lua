@@ -468,13 +468,34 @@ function Board.view(c, ui, now, names)
 		d.title = 'Vote: Route'
 		local left = math.max(0, math.ceil((v.deadline or now) - now))
 		vote_status(v, left)
+		-- Everyone's personal best on each route (the server keeps them per
+		-- Steam / Epic account), fastest first.
+		local shown = 0
+		for _, o in ipairs(v.options or {}) do
+			local bests = {}
+			for _, p in ipairs(players) do
+				local t = type(p.best) == 'table' and p.best[o.id] or nil
+				if type(t) == 'number' then bests[#bests + 1] = { t = t, who = p.id == lobby.you and 'You' or Board.safe(p.name) } end
+			end
+			table.sort(bests, function(a, b) return a.t < b.t end)
+			local parts = {}
+			for i, b in ipairs(bests) do
+				if i > 3 then parts[#parts + 1] = '+' .. (#bests - 3) .. ' more'; break end
+				parts[#parts + 1] = b.who .. ' ' .. fmt_clock(b.t):gsub('%.%d+$', '')
+			end
+			if #parts > 0 then
+				shown = shown + 1
+				line('Best on ' .. (o.name or o.id) .. ':  ' .. table.concat(parts, '   '), GREY)
+			end
+		end
+		if shown == 0 then line('Personal bests show here once racers clear a route.', GREY) end
 		for _, o in ipairs(v.options or {}) do
 			button('opt_' .. o.id, (v.mine == o.id and '> ' or '') .. (o.name or o.id) .. (v.mine == o.id and ' <' or ''),
 				'vote', o.id)
 		end
 		button('leave', 'Leave Race', 'leave')
 		d.focus = v.mine and ('opt_' .. v.mine) or (d.buttons[1] and d.buttons[1].key)
-		d.id = 'vote_route:' .. #(v.options or {}) .. ':' .. tostring(v.mine)
+		d.id = 'vote_route:' .. #(v.options or {}) .. ':' .. tostring(v.mine) .. ':' .. shown
 	elseif phase == 'voting_weapon' or phase == 'voting_keepsake' then
 		local kind = phase == 'voting_weapon' and 'weapon' or 'keepsake'
 		local v = st.vote or { options = {} }

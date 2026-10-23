@@ -203,6 +203,25 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
+- **Store identity** (0.6.3, `identity.lua`): the name and player key come from the store
+  account. Steam: steam_api64.dll's exports, found by walking its PE export table
+  (`get_module_base_address` + `get_dword` / `get_word` / `get_string`; no Hades2.exe signature):
+  `SteamAPI_SteamUser_v0xx()` gives ISteamUser; its vtable slot 2 (`+0x10`) is GetSteamID, which
+  returns the CSteamID through a hidden pointer (Hades2.exe's `SteamWrapper::GetSteamId` calls it
+  that way), so `dynamic_call(..., { this, buffer })` lands the 64 bits in `rom.memory.allocate`d
+  memory, read as two exact dwords and printed by `Identity.u64_decimal` (a SteamID64 doesn't
+  fit a Lua 5.2 double). Persona: `SteamAPI_SteamFriends_v0xx` + `SteamAPI_ISteamFriends_GetPersonaName`.
+  Epic (untested: no Epic copy): `GetCommandLineA` (kernel32) for the launcher's `-epicuserid=` /
+  `-epicusername=`. Read at the first hello (connecting waits for the competitive Crossroads, so
+  Steam is up). The id goes to the server only (`hello.platform` / `platform_id`, self-reported:
+  not verified; Steam auth tickets would be the next step for ratings), never to other players.
+  One account twice in a lobby (the owner's Deck and PC share one) shows "Name (2)". Test bots
+  keep their bot.json names and send no identity unless `identity: true`.
+- **Personal bests on the server** (0.6.3, `pb-store.ts`): per store account and route, the
+  fastest clear by official (server) time, with the region splits the clear reported
+  (`run_complete.splits`), in `PB_FILE` (Railway: `/data/pbs.json`, written via a temp file and
+  rename). `lobby_state` players carry `best` {route: seconds}; the route vote lists them.
+  The HUD's split deltas still use the local `pb.json`.
 - **Log console** (0.6.2): Hell2Modding's `[Logging] Console Enabled = true` (its default, in
   `config/Hell2Modding-Hell2Modding-General.cfg`) opens a separate "Hell2Modding" window of log
   lines at startup (user report: logs on screen at launch). The installers and the test bed set

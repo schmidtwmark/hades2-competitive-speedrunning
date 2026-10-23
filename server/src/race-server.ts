@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { BotBrain } from "./bot-brain.js";
 import { isQuickLine } from "./chat.js";
+import { PbStore } from "./pb-store.js";
 import { RaceLogStore } from "./race-log-store.js";
 import {
   NO_PREFERENCE,
@@ -24,6 +25,7 @@ import {
   type BuildEntry,
   type Outcome,
   type RunStats,
+  type Split,
   VOTE_ORDER,
 } from "./protocol.js";
 import { type ClientVersions, compatibility, LATEST_MOD_VERSION, MIN_MOD_VERSION, type Mismatch, mismatchMessage, modTooOld, tooOldMessage } from "./versions.js";
@@ -69,6 +71,8 @@ export interface ServerOptions {
   botRoomSeconds?: number;
   /** Where each race's record and racers' choice logs go; none: not kept. */
   raceLogs?: RaceLogStore;
+  /** Players' personal bests per route; none: not kept. */
+  pbs?: PbStore;
   /** Options per vote; a missing or empty pool skips that vote. */
   pools: Partial<Record<VotePhase, VoteOption[]>>;
   /** After the votes: time to set Arcana/aspect/familiar before the race starts anyway (default 120 s). */
@@ -100,12 +104,13 @@ interface RunResult {
   clientTime: number | null;
   stats?: RunStats;
   build?: BuildEntry[];
+  splits?: Split[];
 }
 
 interface RaceState extends RaceSetup {
   startAt: number | null;
   /** Everyone who started, kept even if they leave, so results stay complete. */
-  entrants: { id: string; name: string }[];
+  entrants: { id: string; name: string; key: string | null; base: string }[];
   /** Insertion order is finishing order. */
   results: Map<string, RunResult>;
   progress: Map<string, Progress>;
@@ -189,6 +194,10 @@ export class Session {
   lastChat = -Infinity;
   /** A house bot's brain (add_bot): it has no transport and never reconnects. */
   bot: BotBrain | null = null;
+  /** The store account ("steam:<id>" / "epic:<id>"): the player's key for personal bests. */
+  key: string | null = null;
+  /** The name from hello; name may carry a " (2)" while a same-named racer is in the lobby. */
+  baseName = "";
 
   constructor(readonly id: string) {}
 
@@ -245,7 +254,8 @@ export class RaceServer {
     if (s.lobby) s.lobby.lastActivity = this.opts.scheduler.now();
     switch (msg.type) {
       case "hello":
-        return this.onHello(conn, msg.name, msg.token, { mod: msg.version ?? null, gameBuild: msg.game_build ?? null });
+        return this.onHello(conn, msg.name, msg.token, { mod: msg.version ?? null, gameBuild: msg.game_build ?? null },
+          msg.platform && msg.platform_id ? `${msg.platform}:${msg.platform_id}` : null);
       case "chat":
         return this.onChat(s, msg.text);
       case "race_log":
@@ -275,7 +285,7 @@ export class RaceServer {
         return this.onProgress(s, progress);
       }
       case "run_complete":
-        return this.onRunComplete(s, msg.victory, msg.time, msg.stats, msg.build);
+        return this.onRunComplete(s, msg.victory, msg.time, msg.stats, msg.build, msg.splits);
       case "ghost": {
         const { type: _t, ...ghost } = msg;
         return this.onGhost(s, ghost);
@@ -286,6 +296,8 @@ export class RaceServer {
         return this.onRematch(s);
       case "add_bot":
         return this.onAddBot(s);
+      case "identify":
+        return this.onIdentify(s, msg.platform && msg.platform_id ? `${msg.platform}:${msg.platform_id}` : null, msg.name);
     }
   }
 
@@ -299,7 +311,7 @@ export class RaceServer {
 
   // ---------------------------------------------------------------- session
 
-  private onHello(conn: Connection, name: string, token: string | undefined, versions: ClientVersions): void {
+  private onHello(conn: Connection, name: string, token: string | undefined, versions: ClientVersions, key: string | null): void {
     const s = conn.session;
     const prev = token ? this.byToken.get(token) : undefined;
     if (prev && prev !== s) {
@@ -316,6 +328,7 @@ export class RaceServer {
         prev.graceTimer = null;
       }
       prev.versions = versions;
+      prev.key = key ?? prev.key;
       this.log(`resume ${prev.id} (${prev.name})`);
       prev.send(this.welcome(prev, true));
       prev.send({ type: "presence", ...this.presence() });
@@ -341,10 +354,11 @@ export class RaceServer {
       }
       return;
     }
-    s.name = name;
+    s.name = s.baseName = name;
     s.greeted = true;
     s.versions = versions;
-    this.log(`hello ${s.id} name=${name} mod=${versions.mod ?? "?"} game=${versions.gameBuild ?? "?"}`);
+    s.key = key;
+    this.log(`hello ${s.id} name=${name} mod=${versions.mod ?? "?"} game=${versions.gameBuild ?? "?"}${key ? ` ${key.split(":")[0]}` : ""}`);
     s.send(this.welcome(s, false));
     s.send({ type: "presence", ...this.presence() });
     this.presenceChanged();
@@ -543,6 +557,10 @@ export class RaceServer {
 
   private addToLobby(s: Session, lobby: Lobby): void {
     if (s.lobby && s.lobby !== lobby) this.removeFromLobby(s, "forfeit");
+    // Same name as someone here (e.g. one Steam account on two machines): "Mark (2)".
+    s.name = s.baseName || s.name;
+    const taken = new Set(lobby.players.map((p) => p.name));
+    for (let n = 2; taken.has(s.name); n++) s.name = `${s.baseName} (${n})`;
     lobby.players.push(s);
     s.lobby = lobby;
     lobby.lastActivity = this.opts.scheduler.now();
@@ -551,6 +569,17 @@ export class RaceServer {
       p.send({ type: "lobby_joined", code: lobby.code, opponent: lobby.others(p)[0]?.name ?? null });
     }
     this.broadcastState(lobby);
+  }
+
+  /** The store account found after hello: the session's key now, the name from the next lobby on. */
+  private onIdentify(s: Session, key: string | null, name: string | undefined): void {
+    if (key) s.key = key;
+    if (name) {
+      s.baseName = name;
+      if (!s.lobby) s.name = name;
+    }
+    this.log(`identify ${s.id}${key ? ` ${key.split(":")[0]}` : ""}${name ? ` name=${name}` : ""}`);
+    if (s.lobby) this.broadcastState(s.lobby); // their bests
   }
 
   /** A private lobby still waiting: a house bot joins it. */
@@ -607,6 +636,7 @@ export class RaceServer {
     this.presenceChanged();
     if (lobby.phase === "racing" || lobby.phase === "countdown") this.onForfeit(s, outcome);
     lobby.players = lobby.players.filter((p) => p !== s);
+    if (s.baseName) s.name = s.baseName;
     lobby.ready.delete(s.id);
     lobby.rematch.delete(s.id);
     s.lobby = null;
@@ -715,6 +745,7 @@ export class RaceServer {
           host: i === 0,
           rematch: lobby.rematch.has(q.id),
           bot: q.bot !== null,
+          best: this.opts.pbs?.best(q.key) ?? {},
         })),
         race: lobby.race
           ? {
@@ -881,7 +912,7 @@ export class RaceServer {
       keepsake: lobby.selected.keepsake ?? "",
       route: lobby.selected.route ?? "",
       startAt: null,
-      entrants: lobby.players.map((p) => ({ id: p.id, name: p.name })),
+      entrants: lobby.players.map((p) => ({ id: p.id, name: p.name, key: p.key, base: p.baseName || p.name })),
       results: new Map(),
       progress: new Map(),
       build: new Map(),
@@ -970,12 +1001,12 @@ export class RaceServer {
     return Math.round(this.opts.scheduler.now() - race.startAt) / 1000;
   }
 
-  private onRunComplete(s: Session, victory: boolean, clientTime: number, stats?: RunStats, build?: BuildEntry[]): void {
+  private onRunComplete(s: Session, victory: boolean, clientTime: number, stats?: RunStats, build?: BuildEntry[], splits?: Split[]): void {
     const lobby = s.lobby;
     const race = lobby?.race;
     if (!lobby || !race || lobby.phase !== "racing" || race.over) return this.error(s, "not_racing", "No race in progress");
     if (race.results.has(s.id)) return;
-    this.record(lobby, s.id, { outcome: victory ? "cleared" : "died", victory, time: this.raceSeconds(race), clientTime, stats, build });
+    this.record(lobby, s.id, { outcome: victory ? "cleared" : "died", victory, time: this.raceSeconds(race), clientTime, stats, build, splits });
   }
 
   /** Forfeit, leaving or a lost connection: a DNF, exactly like dying. */
@@ -1085,6 +1116,13 @@ export class RaceServer {
     });
     results.forEach((r, i) => (r.place = i + 1));
     this.opts.raceLogs?.finish(lobby.code, race.race_id, results);
+    // Clears count for each racer's personal best on this route (official time).
+    for (const e of race.entrants) {
+      const r = race.results.get(e.id);
+      if (e.key && r?.victory && r.time !== null) {
+        this.opts.pbs?.record(e.key, e.base, race.route || "default", r.time, r.splits ?? [], `${lobby.code}/race${race.race_id}`, this.opts.scheduler.now());
+      }
+    }
     const winner = race.entrants.find((e) => e.id === race.winner);
     this.log(`lobby ${lobby.code} race ${race.race_id} result winner=${winner?.id ?? "draw"} reason=${race.reason}`);
     this.broadcastState(lobby);

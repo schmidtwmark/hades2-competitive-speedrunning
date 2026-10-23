@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { QUICK_LINES } from "../src/chat.js";
+import { PbStore } from "../src/pb-store.js";
 import { RaceLogStore } from "../src/race-log-store.js";
 import { TEST_KEEPSAKES, TEST_WEAPONS, TestClient, group, makeServer, pair, racing, racingGroup } from "./helpers.js";
 
@@ -1019,5 +1020,97 @@ describe("race logs", () => {
     const off = new RaceLogStore(null, () => {}, none.fs);
     off.start("ABCD", { race_id: 1, seed: 1, weapon: "W", keepsake: "K", route: "" }, [{ id: "p1", name: "A", bot: false }], 0);
     assert.equal(none.files.size, 0);
+  });
+});
+
+describe("store identity and personal bests", () => {
+  function memPbs() {
+    const files = new Map<string, string>();
+    return { files, fs: { read: (p: string) => files.get(p) ?? null, write: (p: string, t: string) => void files.set(p, t) } };
+  }
+  const STEAM_A = { platform: "steam", platform_id: "76561197960287930" };
+  const STEAM_B = { platform: "steam", platform_id: "76561197960287931" };
+
+  /** Alice (steam A) and Bob (steam B) race; Alice clears at `clear` ms after the start, Bob falls. */
+  function raceOnce(store: PbStore, clear: number, splits = [{ name: "Erebus", time: 10 }]) {
+    const env = makeServer({ pbs: store });
+    const a = new TestClient(env.server, "Alice");
+    const b = new TestClient(env.server, "Bob");
+    a.hello(undefined, STEAM_A as never);
+    b.hello(undefined, STEAM_B as never);
+    a.send({ type: "create_lobby" });
+    b.send({ type: "join_lobby", code: a.last("lobby_created").code });
+    for (const c of [a, b]) c.send({ type: "ready" });
+    for (const c of [a, b]) c.send({ type: "vote_weapon", weapon: "WeaponAxe" });
+    for (const c of [a, b]) c.send({ type: "vote_keepsake", keepsake: "KeepsakeA" });
+    for (const c of [a, b]) c.send({ type: "ready" });
+    env.scheduler.advance(3000 + clear);
+    b.send({ type: "run_complete", victory: false, time: 1 });
+    a.send({ type: "run_complete", victory: true, time: clear / 1000, splits });
+    return { ...env, a, b };
+  }
+
+  it("keep each store account's fastest clear per route, with its splits, across restarts", () => {
+    const mem = memPbs();
+    const store = new PbStore("/data/pbs.json", () => {}, mem.fs);
+    const first = raceOnce(store, 600_000);
+    assert.deepEqual(store.best("steam:76561197960287930"), { default: 600 });
+    assert.deepEqual(store.best("steam:76561197960287931"), {}, "a fall sets no best");
+    raceOnce(store, 700_000);
+    assert.deepEqual(store.best("steam:76561197960287930"), { default: 600 }, "slower: kept the old one");
+    raceOnce(store, 500_000, [{ name: "Erebus", time: 8 }]);
+    const reloaded = new PbStore("/data/pbs.json", () => {}, mem.fs);
+    assert.deepEqual(reloaded.best("steam:76561197960287930"), { default: 500 });
+    const saved = JSON.parse(mem.files.get("/data/pbs.json")!);
+    assert.deepEqual(saved.players["steam:76561197960287930"].routes.default.splits, [{ name: "Erebus", time: 8 }]);
+    assert.equal(saved.players["steam:76561197960287930"].name, "Alice");
+    void first;
+  });
+
+  it("show every racer's bests in the lobby, never their account ids", () => {
+    const store = new PbStore(null, () => {});
+    store.record("steam:76561197960287930", "Alice", "underworld", 1800, [], "X/race1", 0);
+    const env = makeServer({ pbs: store });
+    const a = new TestClient(env.server, "Alice");
+    const b = new TestClient(env.server, "Bob");
+    a.hello(undefined, STEAM_A as never);
+    b.hello();
+    a.send({ type: "create_lobby" });
+    b.send({ type: "join_lobby", code: a.last("lobby_created").code });
+    const players = b.state().players;
+    assert.deepEqual(players[0]!.best, { underworld: 1800 });
+    assert.deepEqual(players[1]!.best, {}, "no store account: no bests");
+    assert.ok(!JSON.stringify(b.inbox).includes("76561197960287930"), "ids stay on the server");
+  });
+
+  it("ignore malformed store ids; one account twice in a lobby gets a (2)", () => {
+    const { server } = makeServer();
+    const a = new TestClient(server, "Mark");
+    const b = new TestClient(server, "Mark");
+    a.hello(undefined, STEAM_A as never);
+    b.hello(undefined, { platform: "steam", platform_id: "not-a-number" } as never);
+    a.send({ type: "create_lobby" });
+    b.send({ type: "join_lobby", code: a.last("lobby_created").code });
+    assert.deepEqual(a.state().players.map((p) => p.name), ["Mark", "Mark (2)"]);
+    b.send({ type: "leave_lobby" });
+    b.send({ type: "create_lobby" });
+    assert.equal(b.state().players[0]!.name, "Mark", "their own name back outside it");
+  });
+});
+
+describe("identify after hello", () => {
+  it("sets the player key at once and the store name from the next lobby on", () => {
+    const store = new PbStore(null, () => {});
+    store.record("steam:76561197960287930", "Mark", "underworld", 1500, [], "X/race1", 0);
+    const { server } = makeServer({ pbs: store });
+    const a = new TestClient(server, "Melinoe 123");
+    a.hello();
+    a.send({ type: "create_lobby" });
+    a.send({ type: "identify", platform: "steam", platform_id: "76561197960287930", name: "Mark" });
+    assert.deepEqual(a.state().players[0]!.best, { underworld: 1500 }, "bests show right away");
+    assert.equal(a.state().players[0]!.name, "Melinoe 123", "no rename inside the lobby");
+    a.send({ type: "leave_lobby" });
+    a.send({ type: "create_lobby" });
+    assert.equal(a.state().players[0]!.name, "Mark");
   });
 });

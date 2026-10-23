@@ -39,6 +39,9 @@
 --   expect_results  how many racers the results list
 --   update_peek   n: on the board's home page, open How to Update for n seconds first
 --                 (the server must report a newer release; screenshots)
+--   identity      true: send the game's Steam/Epic identity like a player's client (default: none);
+--                 { platform, id, name }: send this one instead (the test PC runs outside Steam)
+--   expect_best   the route vote must list a personal best ("Best on ...")
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
 
@@ -78,6 +81,16 @@ function Bot.new(deps)
 	if cfg.server_host then b.client.host = cfg.server_host end
 	if cfg.server_port then b.client.port = cfg.server_port end
 	if cfg.name then b.client.name = cfg.name end
+	-- Test racers keep their own names and, unless the test is about it, send no
+	-- store identity (the test PC's games all share its Steam account).
+	b.client.fixed_name = cfg.name ~= nil
+	if type(cfg.identity) == 'table' then
+		-- A stand-in account (the test PC's games run outside Steam).
+		local who = cfg.identity
+		b.client.identify = function() return who end
+	elseif not cfg.identity then
+		b.client.identify = nil
+	end
 	-- Mutation twins: deliberately break a feature so its test must fail.
 	b.game.mutations = cfg.mutations or {}
 	-- Shadow tuning: mirror our own hero beside us ({ dx, dy }) and/or rescale.
@@ -465,8 +478,18 @@ function Bot:step_lobby(now, c, st)
 		self:check('lobby filled', true, #lobby.players .. ' racers')
 		self:lobby_action({ 'ready' }, function() c:ready() end)
 	end
-	-- The keepsake vote says which weapon won the vote before it.
 	local d = self.board and self.board.desc
+	-- expect_best: the route vote lists a personal best (set by an earlier race).
+	if phase == 'voting_route' and self.cfg.expect_best and not self.best_checked and d
+		and tostring(d.id):find('^vote_route') then
+		self.best_checked = true
+		local found
+		for _, l in ipairs(d.lines or {}) do
+			if l.text:find('^Best on ') then found = l.text end
+		end
+		self:check('route vote shows personal bests', found ~= nil, found or 'no Best on line')
+	end
+	-- The keepsake vote says which weapon won the vote before it.
 	if phase == 'voting_keepsake' and self.cfg.use_board and not self.picks_checked and d
 		and tostring(d.id):find('^vote_keepsake') then
 		self.picks_checked = true

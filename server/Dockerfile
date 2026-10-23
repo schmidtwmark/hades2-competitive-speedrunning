@@ -14,5 +14,6 @@ COPY --from=build /app/package.json ./
 COPY --from=build /app/dist ./dist
 EXPOSE 7777
 # Volumes mount owned by root: give the race records' folder (RACE_LOG_DIR,
-# Railway: /data/races) to the node user, then run the server as node.
-CMD ["sh", "-c", "if [ -n \"$RACE_LOG_DIR\" ]; then mkdir -p \"$RACE_LOG_DIR\" && chown -R node:node \"$RACE_LOG_DIR\"; fi; exec su-exec node node dist/src/index.js"]
+# Railway: /data/races) and the personal bests' folder (PB_FILE's, /data) to
+# the node user, then run the server as node.
+CMD ["sh", "-c", "if [ -n \"$RACE_LOG_DIR\" ]; then mkdir -p \"$RACE_LOG_DIR\" && chown -R node:node \"$RACE_LOG_DIR\"; fi; if [ -n \"$PB_FILE\" ]; then d=$(dirname \"$PB_FILE\"); mkdir -p \"$d\" && chown node:node \"$d\" && { [ ! -e \"$PB_FILE\" ] || chown node:node \"$PB_FILE\"; }; fi; exec su-exec node node dist/src/index.js"]
