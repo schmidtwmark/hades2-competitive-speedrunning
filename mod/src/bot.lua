@@ -614,6 +614,16 @@ function Bot:probe_prep(now)
 		if hero.ManaRegenSources then hero.ManaRegenSources.BotProbe = nil end
 		self:check('prep: Magick regenerates in the Crossroads', p.mana_from ~= nil and (hero.Mana or 0) > p.mana_from,
 			tostring(p.mana_from) .. ' -> ' .. tostring(hero.Mana))
+		-- The doorway into the rest of the Crossroads (it auto-activates when
+		-- walked into): competitive mode stays in the training grounds.
+		local door = G.MapState and G.MapState.ActiveObstacles and G.MapState.ActiveObstacles[421119]
+		self:check('prep: the doorway to the Crossroads is there', door ~= nil and door.OnUsedFunctionName ~= nil)
+		if door and door.OnUsedFunctionName then
+			G.thread(G.CallFunctionName, door.OnUsedFunctionName, door, door.OnUsedFunctionArgs, hero)
+		end
+		next_stage(4)
+	elseif p.stage == 11 then
+		self:check('prep: still in the training grounds', game:current_map() == 'Hub_PreRun', tostring(game:current_map()))
 		p.done = true
 	end
 end

@@ -30,6 +30,10 @@ start)
   GUI_CFG="$ROM/ReturnOfModding/config/Hell2Modding-Hell2Modding-GUI.cfg"
   if [ -f "$GUI_CFG" ]; then sed -i 's/^onboarded = false/onboarded = true/' "$GUI_CFG"
   else printf 'is_open_at_startup = false\nonboarded = true\n' >"$GUI_CFG"; fi
+  # Like the installer: no log console window.
+  H2M_CFG="$ROM/ReturnOfModding/config/Hell2Modding-Hell2Modding-General.cfg"
+  if grep -q '^Console Enabled' "$H2M_CFG" 2>/dev/null; then sed -i 's/^Console Enabled = .*/Console Enabled = false/' "$H2M_CFG"
+  else printf '[Logging]\nConsole Enabled = false\n' >>"$H2M_CFG"; fi
   systemd-run --user --unit="$UNIT" --collect --quiet \
     -p WorkingDirectory="$TB/game/Ship" \
     -p StandardOutput="append:$OUT" -p StandardError="append:$OUT" \

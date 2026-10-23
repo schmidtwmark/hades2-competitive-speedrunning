@@ -163,6 +163,22 @@ try {
         [IO.File]::WriteAllText($guiCfg, (($lines -join "`n") + "`n"))
     }
 
+    # No log console window at startup (it opens over the game; LogOutput.log keeps
+    # the same lines). Hell2Modding fills in the rest of this file on first launch.
+    $h2mCfg = Join-Path $Rom "config\Hell2Modding-Hell2Modding-General.cfg"
+    Act "turn off Hell2Modding's log console in $h2mCfg" {
+        New-Item -ItemType Directory -Force -Path (Split-Path $h2mCfg) | Out-Null
+        $lines = @()
+        if (Test-Path $h2mCfg) { $lines = @(Get-Content $h2mCfg) }
+        if ($lines | Where-Object { $_ -match '^Console Enabled' }) {
+            $lines = @($lines | ForEach-Object { if ($_ -match '^Console Enabled') { 'Console Enabled = false' } else { $_ } })
+        } else {
+            $lines += '[Logging]'
+            $lines += 'Console Enabled = false'
+        }
+        [IO.File]::WriteAllText($h2mCfg, (($lines -join "`n") + "`n"))
+    }
+
     # The name other racers see (controller players can't type one in game).
     if ($Name) {
         if ($Name -notmatch "^[A-Za-z0-9 _.'-]{1,24}$") { Die "-Name: 1-24 letters, digits, spaces or _ . ' -" }

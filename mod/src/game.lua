@@ -827,9 +827,26 @@ function Game:hook_StartNewRun(base, prevRun, args)
 			pcall(self.racelog.start, self.racelog, { race_id = race.race_id, seed = race.seed, weapon = race.weapon,
 				keepsake = race.keepsake, name = self.client and self.client.name, version = self.client and self.client.version,
 				game_build = self.client and self.client.game_build })
+			-- What the racer brought (their own choices in the prep time): offers can
+			-- differ by it, e.g. Daedalus Hammers by aspect, so reports show it.
+			local ok, loadout = pcall(self.race_loadout, self, race.weapon)
+			if ok and loadout then pcall(self.racelog.event, self.racelog, 'loadout', loadout) end
 		end
 	end
 	return run
+end
+
+-- The racer's aspect, Arcana, familiar and keepsake for the race log.
+function Game:race_loadout(weapon)
+	local GS = self.G.GameState
+	if not GS then return nil end
+	local arcana = {}
+	for name, st in pairs(GS.MetaUpgradeState or {}) do
+		if type(st) == 'table' and st.Equipped then arcana[#arcana + 1] = name end
+	end
+	table.sort(arcana)
+	return { aspect = GS.LastWeaponUpgradeName and GS.LastWeaponUpgradeName[weapon], arcana = arcana,
+		familiar = GS.EquippedFamiliar, keepsake = GS.LastAwardTrait }
 end
 
 -- StartNewRun draws randomness that depends on the save (e.g. the unused-weapon
@@ -1314,6 +1331,7 @@ function Game:verify_competitive_profile()
 	local room = G.CurrentRun and G.CurrentRun.CurrentRoom
 	check('the last room has an encounter', room ~= nil and type(room.Encounter) == 'table', room and tostring(room.Name))
 	check('no fear', next(GS.ShrineUpgrades or {}) == nil)
+	check('eagle already introduced', GS.IntroducedEagle == true)
 	-- Every Erebus miniboss room can come up (two gate on repeat Root-Stalker wins).
 	if G.IsGameStateEligible and G.RoomData then
 		local shut = {}
@@ -1345,6 +1363,18 @@ end
 -- Hub_PreRun. The player can't use anything while the overlay has input, so
 -- ignore those uses.
 function Game:hook_DeathAreaSwitchRoom(base, source, args)
+	-- Competitive mode stays in the training grounds (Hub_PreRun): its doorway
+	-- into the rest of the Crossroads (obstacle 421119, auto-activating) goes
+	-- nowhere. It fires again on every walk-in, so the notice is throttled.
+	if self:competitive_active() and type(args) == 'table' and args.Name == 'Hub_Main' then
+		local now = self.now()
+		if now - (self.hub_block_at or -math.huge) > 4 then
+			self.hub_block_at = now
+			self.log('game: kept in the training grounds (exit to Hub_Main refused)')
+			self:notice('Training Grounds Only', 'Competitive races start from here')
+		end
+		return
+	end
 	local gui = self.rom.gui
 	if source and source.AutoActivate and gui and gui.is_open and gui.is_open() then
 		if not self.logged_door_block then

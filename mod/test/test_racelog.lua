@@ -35,3 +35,19 @@ T.case('racelog: one JSON line per event, tagged with the depth', function()
 	T.eq(lines[3].ev, 'end')
 	T.eq(lines[3].reason, 'completed_first')
 end)
+
+T.case('racelog: every line also goes to the sink (the server), which can fail harmlessly', function()
+	local files, open = fs()
+	local sent = {}
+	local rl = RaceLog.new({ dir = 'races', json = json, now = function() return 5 end, open = open,
+		sink = function(line) sent[#sent + 1] = line end })
+	rl:start({ race_id = 2, seed = 9, name = 'Mel' })
+	rl:set_depth(1)
+	rl:event('room', { name = 'F_Opening01' })
+	T.eq(#sent, 2)
+	T.eq(sent[2].ev, 'room')
+	T.eq(sent[2].depth, 1)
+	T.eq(sent[2].name, 'F_Opening01')
+	rl.sink = function() error('offline') end
+	T.eq(rl:event('doors', {}), true, 'the file still gets the line')
+end)

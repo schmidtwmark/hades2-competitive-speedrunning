@@ -383,3 +383,14 @@ T.case('update_available: only a newer release than ours, compared by number', f
 	c.version = 'dev'
 	T.eq(c:update_available(), nil, 'a dev build never nags')
 end)
+
+T.case('race_log sends a choice-log line tagged with the race', function()
+	local c, f = make()
+	T.eq(c:race_log({ ev = 'room' }), false, 'no race: nothing to tag it with')
+	f.push({ type = 'race_start', race_id = 4, seed = 1, weapon = 'W', keepsake = 'K', countdown = 0, countdown_ms = 0 })
+	c:update()
+	c:race_log({ ev = 'room', depth = 1, name = 'F_Opening01' })
+	local m = f.last('race_log')
+	T.eq(m.race_id, 4)
+	T.eq(m.entry.name, 'F_Opening01')
+end)

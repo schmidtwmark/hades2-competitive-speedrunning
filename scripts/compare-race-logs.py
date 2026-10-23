@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Line up two racers' choice logs (mod/src/racelog.lua) by depth and show
-where their runs offered different things.
+"""Line up racers' choice logs (mod/src/racelog.lua, or the race server's copies
+fetched by scripts/race-report.sh) by depth and show where their runs offered
+different things. With more than two logs, each is compared with the first.
 
-  scripts/compare-race-logs.py A.jsonl B.jsonl
+  scripts/compare-race-logs.py A.jsonl B.jsonl [C.jsonl ...]
 
 Per depth: the room and its encounter, the encounters the game rolled for
 each door's room, the doors offered (room + reward), boon offers (same source
 only), and store stock. What each racer picked is shown but never counts as a
-difference. Ends with "SEEDING: SAME" or "SEEDING: DIFFERENT (...)".
+difference. Per pair it ends with "SEEDING: SAME" or "SEEDING: DIFFERENT (...)",
+then "FAIRNESS: ...": offers can only be expected to match while both racers
+have made the same choices (doors, boons, buys), so a difference before their
+choices first split is the one that means an unfair race.
 """
 import json
 import sys
@@ -17,6 +21,7 @@ from collections import defaultdict
 def load(path):
     by_depth = defaultdict(lambda: defaultdict(list))
     start = {}
+    loadout = None
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -26,8 +31,18 @@ def load(path):
             if e.get("ev") == "start":
                 start = e
                 continue
+            if e.get("ev") == "loadout":
+                loadout = e
+                continue
             by_depth[e.get("depth", 0)][e["ev"]].append(e)
+    start["loadout"] = loadout
     return start, by_depth
+
+
+def loadout_line(lo):
+    if not lo:
+        return "(not logged)"
+    return f"aspect={lo.get('aspect')} keepsake={lo.get('keepsake')} familiar={lo.get('familiar')} arcana={','.join(lo.get('arcana') or []) or '-'}"
 
 
 def room_line(evs):
@@ -76,17 +91,25 @@ def picks(evs):
     return out
 
 
-def main():
-    if len(sys.argv) != 3:
-        sys.exit(__doc__)
-    sa, a = load(sys.argv[1])
-    sb, b = load(sys.argv[2])
+def compare(path_a, path_b):
+    """Print one pair's per-depth comparison; return False if it looks unfair."""
+    sa, a = load(path_a)
+    sb, b = load(path_b)
     na, nb = sa.get("name", "A"), sb.get("name", "B")
-    print(f"A = {na} ({sys.argv[1]})\nB = {nb} ({sys.argv[2]})")
+    print(f"A = {na} ({path_a})\nB = {nb} ({path_b})")
     print(f"race {sa.get('race_id')} vs {sb.get('race_id')}  seed A={sa.get('seed')} B={sb.get('seed')}")
     if sa.get("seed") != sb.get("seed"):
         print("WARNING: different race seeds; these logs are from different races")
+    print(f"loadout A: {loadout_line(sa['loadout'])}\nloadout B: {loadout_line(sb['loadout'])}")
+    # Offers can differ by what each racer brought (hammers by aspect, ...).
+    def kit(lo):
+        return lo and {k: lo.get(k) for k in ("aspect", "arcana", "familiar", "keepsake")}
+    same_loadout = kit(sa["loadout"]) == kit(sb["loadout"]) or not (sa["loadout"] and sb["loadout"])
+    if not same_loadout:
+        print("  (their loadouts differ: some offers may differ because of them)")
     diffs = []
+    unfair = []
+    split_at = None  # first depth where their choices differed
     last = min(max(a or [0]), max(b or [0]))
     for depth in range(1, last + 1):
         ea, eb = a.get(depth, {}), b.get(depth, {})
@@ -107,6 +130,8 @@ def main():
             else:
                 lines.append(f"  {label}: {mark}\n     A {va}\n     B {vb}")
                 diffs.append((depth, label))
+                if split_at is None:
+                    unfair.append((depth, label))
 
         check("room", room_line(ea), room_line(eb))
         check("door rooms' encounters", door_encounters(ea) or None, door_encounters(eb) or None, partial_ok=True)
@@ -117,8 +142,12 @@ def main():
         sa_, sb_ = stores(ea), stores(eb)
         if sa_ or sb_:
             check("store", sa_, sb_)
-        lines.append(f"  picks A: {', '.join(picks(ea)) or '-'}")
-        lines.append(f"  picks B: {', '.join(picks(eb)) or '-'}")
+        pa, pb = picks(ea), picks(eb)
+        lines.append(f"  picks A: {', '.join(pa) or '-'}")
+        lines.append(f"  picks B: {', '.join(pb) or '-'}")
+        if split_at is None and pa != pb:
+            split_at = depth
+            lines.append("  (their choices split here: later offers may differ)")
         print(f"depth {depth}")
         print("\n".join(lines))
     if diffs:
@@ -129,6 +158,29 @@ def main():
         print(f"SEEDING: DIFFERENT ({summary})")
     else:
         print(f"SEEDING: SAME through depth {last}")
+    shared = f"depths 1-{split_at}" if split_at else f"all {last} depths"
+    if unfair:
+        where = ", ".join(f"{label} at depth {d}" for d, label in unfair)
+        if not same_loadout and all(label.startswith("boon offer") for _, label in unfair):
+            print(f"FAIRNESS: LOADOUTS DIFFER ({where}: boon offers can depend on aspect and Arcana)")
+            return True
+        print(f"FAIRNESS: CHECK ({where}, while both had made the same choices)")
+        return False
+    print(f"FAIRNESS: OK (same offers while their choices matched: {shared})")
+    return True
+
+
+def main():
+    if len(sys.argv) < 3:
+        sys.exit(__doc__)
+    logs = sys.argv[1:]
+    fair = True
+    for other in logs[1:]:
+        if len(logs) > 2:
+            print(f"===== {logs[0]} vs {other}")
+        fair = compare(logs[0], other) and fair
+    if len(logs) > 2:
+        print("RACE FAIRNESS: " + ("OK" if fair else "CHECK"))
 
 
 if __name__ == "__main__":

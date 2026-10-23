@@ -115,6 +115,9 @@ function Profile.mark_story_seen(G, GS)
 		if type(G[name]) == 'table' then walk(G[name]) end
 	end
 	GS.ReachedTrueEnding = true
+	-- Olympus's eagle: its first sighting pans the camera and slows the game for a
+	-- few seconds (OlympusEagleFirstSpawnPresentation).
+	GS.IntroducedEagle = true
 	GS.UseRecord = GS.UseRecord or {}
 	GS.LootPickups = GS.LootPickups or {}
 	for name in pairs(G.LootData or {}) do

@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { BotBrain } from "./bot-brain.js";
 import { isQuickLine } from "./chat.js";
+import { RaceLogStore } from "./race-log-store.js";
 import {
   NO_PREFERENCE,
   PROTOCOL_VERSION,
@@ -66,6 +67,8 @@ export interface ServerOptions {
   matchPlayers?: number;
   /** House bots (add_bot): seconds per room in the progress they report (default 75). */
   botRoomSeconds?: number;
+  /** Where each race's record and racers' choice logs go; none: not kept. */
+  raceLogs?: RaceLogStore;
   /** Options per vote; a missing or empty pool skips that vote. */
   pools: Partial<Record<VotePhase, VoteOption[]>>;
   /** After the votes: time to set Arcana/aspect/familiar before the race starts anyway (default 120 s). */
@@ -245,6 +248,8 @@ export class RaceServer {
         return this.onHello(conn, msg.name, msg.token, { mod: msg.version ?? null, gameBuild: msg.game_build ?? null });
       case "chat":
         return this.onChat(s, msg.text);
+      case "race_log":
+        return this.onRaceLog(s, msg.race_id, msg.entry);
       case "ping":
         return s.send({ type: "pong", t: msg.t ?? null, server_time: this.opts.scheduler.now() });
       case "create_lobby":
@@ -661,6 +666,7 @@ export class RaceServer {
   }
 
   private closeLobby(lobby: Lobby): void {
+    this.opts.raceLogs?.forget(lobby.code);
     this.clearTimers(lobby);
     this.lobbies.delete(lobby.code);
     this.log(`lobby ${lobby.code} closed`);
@@ -890,6 +896,12 @@ export class RaceServer {
     this.log(
       `lobby ${lobby.code} race ${race.race_id} seed=${race.seed} route=${race.route} weapon=${race.weapon} keepsake=${race.keepsake}`,
     );
+    this.opts.raceLogs?.start(
+      lobby.code,
+      { race_id: race.race_id, seed: race.seed, weapon: race.weapon, keepsake: race.keepsake, route: race.route },
+      lobby.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot !== null })),
+      this.opts.scheduler.now(),
+    );
     this.broadcastState(lobby);
     for (const p of lobby.players) {
       p.send({
@@ -924,6 +936,13 @@ export class RaceServer {
     if (progress.build) race.build.set(s.id, progress.build);
     if (progress.stats) race.stats.set(s.id, progress.stats);
     for (const o of lobby.others(s)) o.send({ type: "opponent_progress", ...progress, ...who(s) });
+  }
+
+  /** A line of a racer's choice log, kept with this race's record (the one in progress or just over). */
+  private onRaceLog(s: Session, raceId: number, entry: Record<string, unknown>): void {
+    const lobby = s.lobby;
+    if (!lobby || lobby.race?.race_id !== raceId) return;
+    this.opts.raceLogs?.event(lobby.code, raceId, s.id, entry);
   }
 
   /** Relay only: positions are useless a moment later, so nothing is stored. */
@@ -1065,6 +1084,7 @@ export class RaceServer {
       return (b.depth ?? 0) - (a.depth ?? 0) || (b.time ?? 0) - (a.time ?? 0);
     });
     results.forEach((r, i) => (r.place = i + 1));
+    this.opts.raceLogs?.finish(lobby.code, race.race_id, results);
     const winner = race.entrants.find((e) => e.id === race.winner);
     this.log(`lobby ${lobby.code} race ${race.race_id} result winner=${winner?.id ?? "draw"} reason=${race.reason}`);
     this.broadcastState(lobby);

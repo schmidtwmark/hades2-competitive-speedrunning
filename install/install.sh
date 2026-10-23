@@ -145,6 +145,18 @@ else
     echo 'onboarded = true'; } >"$GUI_CFG.new" && mv -f "$GUI_CFG.new" "$GUI_CFG"
 fi
 
+# No log console window at startup (it opens over the game; LogOutput.log keeps
+# the same lines). Hell2Modding fills in the rest of this file on first launch.
+H2M_CFG="$ROM/config/Hell2Modding-Hell2Modding-General.cfg"
+if [ "$DRY" = 1 ]; then
+  say "  (dry run) turn off Hell2Modding's log console in $H2M_CFG"
+elif grep -q '^Console Enabled' "$H2M_CFG" 2>/dev/null; then
+  sed -i 's/^Console Enabled = .*/Console Enabled = false/' "$H2M_CFG"
+else
+  mkdir -p "$(dirname "$H2M_CFG")"
+  printf '[Logging]\nConsole Enabled = false\n' >>"$H2M_CFG"
+fi
+
 # The name other racers see (controller players can't type one in game).
 if [ -n "$NAME" ]; then
   printf '%s' "$NAME" | grep -Eq "^[A-Za-z0-9 _.'-]{1,24}$" || die "--name: 1-24 letters, digits, spaces or _ . ' -"

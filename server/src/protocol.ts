@@ -81,6 +81,11 @@ export type ClientMessage =
   | { type: "rematch" }
   /** A private lobby still waiting: a house bot joins (votes "any", readies, never clears first). */
   | { type: "add_bot" }
+  /**
+   * One line of the racer's choice log (mod/src/racelog.lua: rooms, encounters,
+   * doors, offers, picks), kept by the server per race for fairness checks.
+   */
+  | { type: "race_log"; race_id: number; entry: Record<string, unknown> }
   /** A chat line to everyone in the lobby: one of the quick lines (chat.ts), nothing else. */
   | { type: "chat"; text: string }
   | { type: "ping"; t?: number };
@@ -222,6 +227,15 @@ export class ProtocolError extends Error {
   }
 }
 
+/** A race log line: a JSON object of at most MAX_LOG_ENTRY characters. */
+export const MAX_LOG_ENTRY = 8192;
+function logEntry(o: Record<string, unknown>): Record<string, unknown> {
+  const v = o.entry;
+  if (typeof v !== "object" || v === null || Array.isArray(v)) throw new ProtocolError("bad_field", "field 'entry' must be an object");
+  if (JSON.stringify(v).length > MAX_LOG_ENTRY) throw new ProtocolError("bad_field", `race log entries are at most ${MAX_LOG_ENTRY} characters`);
+  return v as Record<string, unknown>;
+}
+
 /** Chat text: control characters removed, whitespace collapsed, 1-80 characters. */
 function chatText(o: Record<string, unknown>): string {
   const raw = typeof o.text === "string" ? o.text : "";
@@ -354,6 +368,8 @@ export function parseClientMessage(raw: unknown): ClientMessage {
       };
     case "run_complete":
       return { type, time: num(o, "time"), victory: bool(o, "victory"), stats: optStats(o), build: optBuild(o) };
+    case "race_log":
+      return { type, race_id: num(o, "race_id"), entry: logEntry(o) };
     case "chat":
       return { type, text: chatText(o) };
     case "ping":

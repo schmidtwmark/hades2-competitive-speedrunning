@@ -203,6 +203,27 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
+- **Log console** (0.6.2): Hell2Modding's `[Logging] Console Enabled = true` (its default, in
+  `config/Hell2Modding-Hell2Modding-General.cfg`) opens a separate "Hell2Modding" window of log
+  lines at startup (user report: logs on screen at launch). The installers and the test bed set
+  it false; `LogOutput.log` still gets every line.
+- **Training grounds only** (0.6.2): Hub_PreRun's doorway into the rest of the Crossroads is
+  obstacle 421119 (`DeathAreaSwitchRoom` to `Hub_Main`, AutoActivate). In competitive mode the
+  `DeathAreaSwitchRoom` hook refuses `Hub_Main` and shows "Training Grounds Only" (at most every
+  4 s: walking into it fires again). Probe: `PROBE_PREP` uses the doorway and checks the map.
+- **First-time presentations** (0.6.2): `GameState.IntroducedEagle` gates Olympus's eagle intro
+  (camera pan and a few seconds at 0.18 sim speed, `OlympusEagleFirstSpawnPresentation`). The
+  profile sets it. A scan of flags the scripts check unset and then set true found no other
+  presentation flag (the rest are save patches; `ReachedTrueEnding` was already set).
+- **Race records** (0.6.2): each choice-log line (`racelog.lua`) also goes to the server
+  (`race_log`, at most 8 KB a line, 5000 a racer); with `RACE_LOG_DIR` set (Railway: a volume at
+  `/data`, `RACE_LOG_DIR=/data/races`) `race-log-store.ts` keeps a folder per race: `race.json`
+  (setup, entrants, results) and one `.jsonl` per human racer in the client format behind the
+  server's start line. A `loadout` line (aspect, Arcana, familiar, keepsake) follows the start:
+  Daedalus Hammer offers depend on the aspect, so racers with different aspects can see different
+  hammers on the same seed (a diverging test run did at depth 1). `scripts/race-report.sh [n]`
+  lists the records over `railway ssh` and reports one: `compare-race-logs.py` per depth and a
+  FAIRNESS line (a difference counts only while both racers' choices still matched).
 - **Encounter counts** (0.6.1): `EncountersCompletedCache` / `EncountersOccurredCache` hold
   counts, and rooms and boss attacks gate on them: Erebus's `F_MiniBoss02` (Shadow-Spiller) and
   `F_MiniBoss03` need `MiniBossTreant >= 2`, Hecate's meteor hex needs `BossHecate01 >= 10`,

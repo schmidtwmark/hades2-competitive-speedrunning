@@ -221,6 +221,13 @@ function Client:forfeit(stats, build)
 	return self:send({ type = 'forfeit', stats = stats, build = build })
 end
 
+-- One line of this race's choice log, for the server's record of the race.
+function Client:race_log(entry)
+	local r = self.state.race
+	if not (r and r.race_id and type(entry) == 'table') then return false end
+	return self:send({ type = 'race_log', race_id = r.race_id, entry = entry })
+end
+
 function Client:rematch()
 	self.state.rematch_requested = true
 	return self:send({ type = 'rematch' })

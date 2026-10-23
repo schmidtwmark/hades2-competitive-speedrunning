@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.6.1'
+local VERSION = '0.6.2'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -161,6 +161,8 @@ local client = Client.new({
 	},
 })
 game.client = client
+-- Every choice-log line also goes to the race server's record of the race.
+game.racelog.sink = function(line) client:race_log(line) end
 -- Sent with hello: the server only pairs racers on the same Hades II build.
 client.game_build = game:game_build()
 local build_day = client.game_build and os and os.date and os.date('!%Y-%m-%d', client.game_build)

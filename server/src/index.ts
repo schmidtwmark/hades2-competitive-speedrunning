@@ -1,4 +1,5 @@
 import { KEEPSAKES, routes, WEAPONS } from "./pools.js";
+import { RaceLogStore } from "./race-log-store.js";
 import { RaceServer, realRandom, realScheduler } from "./race-server.js";
 import { listen } from "./tcp.js";
 
@@ -17,6 +18,7 @@ const server = new RaceServer({
   matchPlayers: Number(env.MATCH_PLAYERS ?? 2),
   botRoomSeconds: Number(env.BOT_ROOM_SECONDS ?? 75),
   latestModVersion: env.LATEST_MOD_VERSION || undefined, // tests: pretend a newer release exists
+  raceLogs: env.RACE_LOG_DIR ? new RaceLogStore(env.RACE_LOG_DIR, log) : undefined,
   pools: { route: routes(env.ROUTES), weapon: WEAPONS, keepsake: KEEPSAKES },
   prepMs: Number(env.PREP_SECONDS ?? 120) * 1000,
   fixedSeed: env.RACE_SEED ? Number(env.RACE_SEED) : undefined,

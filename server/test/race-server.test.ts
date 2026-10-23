@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { QUICK_LINES } from "../src/chat.js";
+import { RaceLogStore } from "../src/race-log-store.js";
 import { TEST_KEEPSAKES, TEST_WEAPONS, TestClient, group, makeServer, pair, racing, racingGroup } from "./helpers.js";
 
 describe("session", () => {
@@ -947,5 +948,76 @@ describe("house bots", () => {
     a.send({ type: "leave_lobby" });
     assert.equal(server.lobbyCount, 1, "only Quinn's search is left");
     scheduler.advance(10_000);
+  });
+});
+
+describe("race logs", () => {
+  /** An in-memory file system: path -> contents. */
+  function memFs() {
+    const files = new Map<string, string>();
+    return {
+      files,
+      fs: {
+        mkdir: () => {},
+        append: (p: string, t: string) => void files.set(p, (files.get(p) ?? "") + t),
+        write: (p: string, t: string) => void files.set(p, t),
+      },
+      lines: (suffix: string) => {
+        const k = [...files.keys()].find((x) => x.endsWith(suffix))!;
+        return files.get(k)!.trim().split("\n").map((l) => JSON.parse(l));
+      },
+    };
+  }
+
+  it("keep each race's setup, every racer's choice log and the results", () => {
+    const mem = memFs();
+    const store = new RaceLogStore("/data/races", () => {}, mem.fs);
+    const { a, b, scheduler } = racing({ raceLogs: store });
+    const id = a.last("race_start").race_id;
+    a.send({ type: "race_log", race_id: id, entry: { ev: "room", depth: 1, name: "F_Opening01", encounter: "OpeningGeneratedF" } });
+    b.send({ type: "race_log", race_id: id, entry: { ev: "room", depth: 1, name: "F_Opening01", encounter: "OpeningGeneratedF" } });
+    a.send({ type: "race_log", race_id: id, entry: { ev: "start", depth: 0, name: "fake" } });
+    a.send({ type: "race_log", race_id: id + 1, entry: { ev: "room", depth: 9, name: "wrong race" } });
+    a.send({ type: "race_log", race_id: id, entry: { ev: "boon", depth: 1, blob: "x".repeat(9000) } });
+    assert.equal(a.last("error").code, "bad_field", "oversized lines are refused");
+    const folder = [...mem.files.keys()].find((k) => k.endsWith("race.json"))!;
+    assert.match(folder, /^\/data\/races\/\d{8}-\d{6}-[A-Z2-9]{4}-race1\/race\.json$/);
+    const alice = mem.lines("1-Alice.jsonl");
+    assert.deepEqual(alice.map((e) => e.ev), ["start", "room"], "our start line, then hers (not her own start, not the wrong race)");
+    assert.equal(alice[0].seed, a.last("race_start").seed);
+    assert.equal(alice[0].name, "Alice");
+    assert.equal(mem.lines("2-Bob.jsonl").length, 2);
+    a.send({ type: "run_complete", victory: true, time: 100 });
+    b.send({ type: "run_complete", victory: false, time: 50 });
+    const summary = JSON.parse(mem.files.get(folder)!);
+    assert.deepEqual(summary.entrants.map((e: { name: string }) => e.name), ["Alice", "Bob"]);
+    assert.equal(summary.results[0].name, "Alice");
+    assert.equal(summary.results[0].build, undefined, "no builds in the summary");
+    a.send({ type: "race_log", race_id: id, entry: { ev: "end", depth: 1, reason: "completed_first" } });
+    assert.equal(mem.lines("1-Alice.jsonl").at(-1).ev, "end", "a line after the result still lands");
+    void scheduler;
+  });
+
+  it("give house bots no log; without a directory nothing is written", () => {
+    const mem = memFs();
+    const env = makeServer({ raceLogs: new RaceLogStore("/data/races", () => {}, mem.fs) });
+    const a = new TestClient(env.server, "Ann");
+    a.hello();
+    a.send({ type: "create_lobby" });
+    a.send({ type: "add_bot" });
+    env.scheduler.advance(1000);
+    a.send({ type: "ready" });
+    a.send({ type: "vote_weapon", weapon: "WeaponAxe" });
+    env.scheduler.advance(1000);
+    a.send({ type: "vote_keepsake", keepsake: "KeepsakeA" });
+    env.scheduler.advance(1000);
+    a.send({ type: "ready" });
+    env.scheduler.advance(1000);
+    const logs = [...mem.files.keys()].filter((k) => k.endsWith(".jsonl"));
+    assert.deepEqual(logs.map((k) => k.split("/").at(-1)), ["1-Ann.jsonl"]);
+    const none = memFs();
+    const off = new RaceLogStore(null, () => {}, none.fs);
+    off.start("ABCD", { race_id: 1, seed: 1, weapon: "W", keepsake: "K", route: "" }, [{ id: "p1", name: "A", bot: false }], 0);
+    assert.equal(none.files.size, 0);
   });
 });
