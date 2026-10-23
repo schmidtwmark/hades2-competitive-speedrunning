@@ -46,6 +46,12 @@ Profile.LIFETIME_TOTAL = 100000
 -- Completed runs recorded in history; feeds GetCompletedRuns-based eligibility.
 local STUB_RUNS = 50
 
+-- Times every encounter counts as won and seen, like a veteran's file. Rooms and
+-- boss attacks can unlock only after repeat wins: Erebus's other two minibosses
+-- need two Root-Stalker wins, Hecate's meteor hex ten. At 1, every Erebus run met
+-- the Root-Stalker and bosses fought with their first-encounter movesets.
+Profile.ENCOUNTER_COUNT = 10
+
 local function satisfy(G, reqs)
 	for _, r in ipairs(reqs or {}) do
 		local p = r.PathTrue
@@ -374,8 +380,8 @@ function Profile.build(G, saved)
 		if type(name) == 'string' and name:find('Tutorial') then GS.CompletedObjectiveSets[name] = true end
 	end
 	for _, encounter in ipairs(sorted_keys(G.EncounterData)) do
-		GS.EncountersCompletedCache[encounter] = 1
-		GS.EncountersOccurredCache[encounter] = 1
+		GS.EncountersCompletedCache[encounter] = Profile.ENCOUNTER_COUNT
+		GS.EncountersOccurredCache[encounter] = Profile.ENCOUNTER_COUNT
 	end
 
 	-- Identical run history for everyone.

@@ -1314,6 +1314,15 @@ function Game:verify_competitive_profile()
 	local room = G.CurrentRun and G.CurrentRun.CurrentRoom
 	check('the last room has an encounter', room ~= nil and type(room.Encounter) == 'table', room and tostring(room.Name))
 	check('no fear', next(GS.ShrineUpgrades or {}) == nil)
+	-- Every Erebus miniboss room can come up (two gate on repeat Root-Stalker wins).
+	if G.IsGameStateEligible and G.RoomData then
+		local shut = {}
+		for _, name in ipairs({ 'F_MiniBoss01', 'F_MiniBoss02', 'F_MiniBoss03' }) do
+			local room = G.RoomData[name]
+			if not (room and G.IsGameStateEligible(room, room.GameStateRequirements)) then shut[#shut + 1] = name end
+		end
+		check('every Erebus miniboss eligible', #shut == 0, table.concat(shut, ','))
+	end
 	return checks
 end
 

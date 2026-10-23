@@ -867,43 +867,6 @@ describe("chat", () => {
   });
 });
 
-describe("solo runs", () => {
-  it("vote alone at once, ready alone, race alone; a clear is a win and a rematch is yours to start", () => {
-    const { server, scheduler } = makeServer();
-    const a = new TestClient(server, "Ann");
-    a.hello();
-    a.send({ type: "create_lobby", solo: true });
-    assert.equal(a.state().solo, true);
-    assert.equal(a.last("vote_phase").phase, "weapon");
-    a.send({ type: "vote_weapon", weapon: "WeaponAxe" });
-    assert.equal(a.last("vote_result").selected, "WeaponAxe", "no one else to wait for");
-    a.send({ type: "vote_keepsake", keepsake: "KeepsakeB" });
-    assert.equal(a.state().phase, "ready_check");
-    a.send({ type: "ready" });
-    assert.equal(a.last("race_start").weapon, "WeaponAxe");
-    scheduler.advance(3000);
-    a.send({ type: "run_complete", victory: true, time: 100 });
-    const r = a.last("race_result");
-    assert.equal(r.you_won, true);
-    assert.equal(r.results.length, 1);
-    a.send({ type: "rematch" });
-    assert.equal(a.state().phase, "voting_weapon");
-  });
-
-  it("nobody can join a solo run", () => {
-    const { server } = makeServer();
-    const a = new TestClient(server, "Ann");
-    const b = new TestClient(server, "Bob");
-    a.hello();
-    b.hello();
-    a.send({ type: "create_lobby", solo: true });
-    b.send({ type: "join_lobby", code: a.state().code });
-    assert.equal(b.last("error").code, "lobby_full");
-    a.send({ type: "add_bot" });
-    assert.equal(a.last("error").code, "not_waiting");
-  });
-});
-
 describe("house bots", () => {
   const ROOM = 75_000;
 
@@ -912,7 +875,8 @@ describe("house bots", () => {
     const env = makeServer();
     const a = new TestClient(env.server, "Ann");
     a.hello();
-    a.send({ type: "create_lobby", bot: true });
+    a.send({ type: "create_lobby" });
+    a.send({ type: "add_bot" });
     const bot = a.state().players.find((p) => p.bot)!;
     assert.equal(bot.name, "Bot");
     env.scheduler.advance(1000);

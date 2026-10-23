@@ -136,11 +136,9 @@ end
 
 -- actions -----------------------------------------------------------------------
 
--- how.solo: race alone (the vote starts at once); how.bot: a house bot joins.
-function Client:create_lobby(how)
-	how = how or {}
+function Client:create_lobby()
 	self.state.mismatch = nil
-	return self:send({ type = 'create_lobby', solo = how.solo or nil, bot = how.bot or nil })
+	return self:send({ type = 'create_lobby' })
 end
 
 -- A private lobby still waiting: a house bot joins (it follows the votes).

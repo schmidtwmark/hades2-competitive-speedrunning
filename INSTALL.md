@@ -66,9 +66,9 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
   agree on (the first to enter it opens the race).
 - Once your rivals are in, everyone presses **Ready to Vote** (Not Ready takes it
   back); the vote starts when everyone is ready.
-- **Practice**: **Race a Bot** races the server's bot, which follows your votes,
-  shows its progress like a rival and never clears first. **Solo Run** votes and
-  races on your own. In a private race, **Add Bot** adds bots alongside your friends.
+- **Bots**: in a private race, **Add Bot** adds the server's bot. It follows your
+  votes, shows its progress like a rival and never clears first, so a private race
+  with a bot is also how to practice on your own.
 - Vote on the route (Underworld, Surface or Dream Dive), the weapon and the keepsake (most
   votes wins, ties are drawn at random). Each vote shows what the earlier ones picked,
   so you know the weapon when you choose a keepsake.

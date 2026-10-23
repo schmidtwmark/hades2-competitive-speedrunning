@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Practice from the Race Board, in one competitive game instance on the test PC
-# against a server on this Mac: "race_bot" takes Practice -> Race a Bot (the
-# server's house bot joins, readies and follows our votes), "solo" takes
-# Practice -> Solo Run. The in-game bot presses the board's controls, votes,
-# readies, clears the run and checks the result (and, against the house bot,
-# that it reported its rooms and that the keepsake vote named the weapon pick).
-#   scripts/e2e-practice.sh [race_bot|solo] [rooms]
+# Race the server's house bot from the Race Board, in one competitive game
+# instance on the test PC against a server on this Mac: Create Private Race,
+# Add Bot (it joins, readies and follows our votes), Ready to Vote. The in-game
+# bot presses the board's controls, votes, readies, clears the run and checks
+# the result, that the house bot reported its rooms and that the keepsake vote
+# named the weapon pick.
+#   scripts/e2e-house-bot.sh [rooms]
 # BOT_EXTRA='"update_peek":8' adds bot.json fields; server env vars (e.g.
 # LATEST_MOD_VERSION=9.9.9) pass through to the local server.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${BAZZITE:-bazzite.local}"
-MODE="${1:-race_bot}"
-ROOMS="${2:-2}"
+MODE=house_bot
+ROOMS="${1:-2}"
 TIMEOUT="${E2E_TIMEOUT:-600}"
 GUID="schmidtwmark-RankedRace"
 PORT=$((20000 + RANDOM % 20000))
-RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-practice-$MODE"
+RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-house-bot"
 mkdir -p "$RUN"
 RHOME="$(ssh "$HOST" 'echo $HOME')"
 TB="$RHOME/h2r-testbed"
@@ -29,11 +29,7 @@ cleanup() {
 }
 trap cleanup EXIT
 fail() { echo "RESULT: FAIL $*"; exit 1; }
-case "$MODE" in
-  race_bot) EXTRA='"expect_rival":"Bot","expect_results":2' ;;
-  solo) EXTRA='"expect_results":1' ;;
-  *) fail "unknown mode $MODE" ;;
-esac
+EXTRA='"expect_rival":"Bot","expect_results":2'
 
 (cd "$ROOT/server" && npm run --silent build) || fail "server build"
 # The house bot reports a room every 5 s, so a short run sees its progress.
@@ -43,7 +39,7 @@ PIDS+=($!)
 for _ in $(seq 50); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.1; done
 "$ROOT/scripts/bazzite/push.sh" >/dev/null || fail "push"
 cat >"$RUN/bot.json" <<JSON
-{"role":"$MODE","name":"PracticeBot","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,"use_board":true,
+{"role":"$MODE","name":"BotRacer","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,"use_board":true,
  "route":"underworld","weapon":"WeaponDagger","keepsake":"LowHealthCritKeepsake",
  "outcome":"win","clear_screen":true,"expect":"win","expect_reason":"completed_first",$EXTRA,"expect_results_screen":true,
  "timeout":$((TIMEOUT - 60)),"quit_after":5,"press_competitive_after":3,"expect_competitive":true,"reset_to_hub":false${BOT_EXTRA:+,$BOT_EXTRA}}
@@ -64,8 +60,8 @@ echo "--- game bot ($RUN)"
 cat "$RUN/bot-result.txt" 2>/dev/null || echo "(no bot-result.txt)"
 grep -c "Script error" "$RUN/LogOutput.log" 2>/dev/null | sed 's/^/script errors: /'
 if grep -q '^RESULT: PASS' "$RUN/bot-result.txt" 2>/dev/null && ! grep -q "Script error" "$RUN/LogOutput.log" 2>/dev/null; then
-  echo "RESULT: PASS (practice $MODE)"
+  echo "RESULT: PASS (house bot)"
 else
   echo "--- ranked.log tail"; tail -25 "$RUN/ranked.log" 2>/dev/null
-  fail "practice $MODE"
+  fail "house bot"
 fi

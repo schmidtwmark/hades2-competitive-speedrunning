@@ -122,8 +122,6 @@ class Lobby {
   players: Session[] = [];
   /** Made by Find Match (two racers) rather than shared by its code. */
   isPublic = false;
-  /** A solo run: one racer, voting started at once. */
-  solo = false;
   votes: Record<VotePhase, Map<string, string>> = { route: new Map(), weapon: new Map(), keepsake: new Map() };
   selected: Record<VotePhase, string | null> = { route: null, weapon: null, keepsake: null };
   /** ready_check: when the race starts even if not everyone is ready. */
@@ -142,13 +140,9 @@ class Lobby {
     readonly maxPlayers: number,
   ) {}
 
-  /** Racers needed to vote, start and rematch: two, or one for a solo run. */
-  get minPlayers(): number {
-    return this.solo ? 1 : 2;
-  }
-
+  /** Two or more racers: enough to vote, start and rematch. */
   get enough(): boolean {
-    return this.players.length >= this.minPlayers;
+    return this.players.length >= 2;
   }
 
   others(s: Session): Session[] {
@@ -254,7 +248,7 @@ export class RaceServer {
       case "ping":
         return s.send({ type: "pong", t: msg.t ?? null, server_time: this.opts.scheduler.now() });
       case "create_lobby":
-        return this.onCreate(s, undefined, { solo: msg.solo === true, bot: msg.bot === true });
+        return this.onCreate(s);
       case "find_match":
         return this.onFindMatch(s);
       case "cancel_match":
@@ -475,17 +469,14 @@ export class RaceServer {
     throw new Error("no free lobby codes");
   }
 
-  private onCreate(s: Session, code = this.newCode(), how: { solo?: boolean; bot?: boolean } = {}): void {
+  private onCreate(s: Session, code = this.newCode()): void {
     if (this.warnIfOutdated(s)) return;
     if (s.lobby) this.removeFromLobby(s, "forfeit");
-    const lobby = new Lobby(code, this.opts.scheduler.now(), how.solo ? 1 : this.maxPlayers);
-    lobby.solo = how.solo === true;
+    const lobby = new Lobby(code, this.opts.scheduler.now(), this.maxPlayers);
     this.lobbies.set(lobby.code, lobby);
-    this.log(`lobby ${lobby.code} created by ${s.id}${lobby.solo ? " (solo)" : ""}`);
+    this.log(`lobby ${lobby.code} created by ${s.id}`);
     this.addToLobby(s, lobby);
     s.send({ type: "lobby_created", code: lobby.code });
-    if (lobby.solo) this.startVoting(lobby);
-    else if (how.bot) this.addBot(lobby);
   }
 
   /**
@@ -561,7 +552,7 @@ export class RaceServer {
   private onAddBot(s: Session): void {
     const lobby = s.lobby;
     if (!lobby || lobby.phase !== "waiting") return this.error(s, "not_waiting", "Bots join a race before the vote");
-    if (lobby.isPublic || lobby.solo) return this.error(s, "not_private", "Bots only join private races");
+    if (lobby.isPublic) return this.error(s, "not_private", "Bots only join private races");
     if (lobby.players.length >= lobby.maxPlayers) return this.error(s, "lobby_full", `Lobby ${lobby.code} is full`);
     this.addBot(lobby);
   }
@@ -729,7 +720,6 @@ export class RaceServer {
             }
           : null,
         public: lobby.isPublic,
-        solo: lobby.solo,
         max_players: lobby.maxPlayers,
         prep_ends_in:
           lobby.prepEndsAt !== null ? Math.max(0, Math.ceil((lobby.prepEndsAt - this.opts.scheduler.now()) / 1000)) : null,

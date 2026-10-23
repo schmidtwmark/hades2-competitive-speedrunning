@@ -7,7 +7,7 @@
 --   role          "host" | "join" | "queue" (Find Match; both bots queue)
 --                 | "code" (both type race_code; the first opens it)
 --                 | "pad" (hands off the lobby: a real controller drives the board)
---                 | "race_bot" | "solo" (Practice: against the server's house bot, or alone)
+--                 | "house_bot" (Create Private Race, then Add Bot: race the server's bot)
 --   code_file     host writes the lobby code here, joiner polls it
 --   start_at      ready to vote once this many racers are in (default 2)
 --   weapon, keepsake  what to vote for (default: first option)
@@ -371,9 +371,8 @@ function Bot:step_wait_game(now, c)
 		elseif self.cfg.role == 'host' then
 			self:lobby_action({ 'create' }, function() c:create_lobby() end)
 			self:go_step('hosting')
-		elseif self.cfg.role == 'race_bot' or self.cfg.role == 'solo' then
-			local how = self.cfg.role == 'solo' and { solo = true } or { bot = true }
-			self:lobby_action({ 'practice', self.cfg.role }, function() c:create_lobby(how) end)
+		elseif self.cfg.role == 'house_bot' then
+			self:lobby_action({ 'create', 'add_bot' }, function() c:create_lobby() end)
 			self:go_step('hosting')
 		elseif self.cfg.role == 'queue' then
 			self:lobby_action({ 'find' }, function() c:find_match() end)
@@ -393,6 +392,10 @@ end
 
 function Bot:step_hosting(now, c, st)
 	local lobby = st.lobby
+	if self.cfg.role == 'house_bot' and not self.cfg.use_board and lobby and not self.bot_added then
+		self.bot_added = true
+		c:add_bot()
+	end
 	if lobby and lobby.code and self.cfg.code_file and not self.code_written then
 		local f = io.open(self.cfg.code_file, 'w')
 		if f then

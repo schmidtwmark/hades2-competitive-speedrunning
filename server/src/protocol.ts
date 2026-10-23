@@ -58,8 +58,7 @@ export interface Ghost {
 export type ClientMessage =
   /** version: the mod's version; game_build: the Hades II executable's link time (Unix seconds). */
   | { type: "hello"; name: string; version?: string; token?: string; game_build?: number }
-  /** solo: race alone (voting starts at once); bot: a house bot joins the new lobby. */
-  | { type: "create_lobby"; solo?: boolean; bot?: boolean }
+  | { type: "create_lobby" }
   | { type: "find_match" }
   | { type: "cancel_match" }
   /** create: if no lobby has this code yet, open one under it and wait (both racers can type an agreed code). */
@@ -170,8 +169,6 @@ export type ServerMessage =
       race: RaceSetup | null;
       /** A Find Match lobby (two racers) rather than a private one (shared by its code). */
       public: boolean;
-      /** A solo run: one racer, nobody else can join. */
-      solo: boolean;
       max_players: number;
       /** ready_check: seconds until the race starts anyway (prep time for Arcana, aspect, familiar). */
       prep_ends_in: number | null;
@@ -310,10 +307,9 @@ export function parseClientMessage(raw: unknown): ClientMessage {
         token: optStr(o, "token", 128),
         game_build: optNum(o, "game_build"),
       };
-    case "create_lobby":
-      return { type, ...(o.solo === true ? { solo: true } : {}), ...(o.bot === true ? { bot: true } : {}) };
     case "ready":
       return { type, ...(o.ready === false ? { ready: false } : {}) };
+    case "create_lobby":
     case "find_match":
     case "cancel_match":
     case "leave_lobby":

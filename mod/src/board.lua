@@ -1,6 +1,6 @@
 -- The Race Board: a native, controller-first screen for everything before
--- and after a race (Find Match, private lobby codes, practice against a bot
--- or alone, votes, ready, results), for races of one up to five racers.
+-- and after a race (Find Match, private lobby codes and house bots, votes,
+-- ready, results), for races of two up to five racers.
 -- It is built like the game's own menus (OnScreenOpened, CreateScreenFromData,
 -- interactable screen components, NotifyOnInteractOrControlPressed), so the
 -- gamepad cursor, Confirm and Cancel work exactly as in the Keepsake rack.
@@ -65,15 +65,18 @@ Board.QUICK_LINES = { 'GG', 'Good luck!', 'Nice!', 'Oops', 'Well played', 'Remat
 Board.REPO = 'github.com/schmidtwmark/hades2-ranked-race'
 -- Lines stay under ~60 characters: longer ones wrap onto the next line.
 Board.WELCOME_LINES = {
-	{ 'Spoilers ahead: a 100% completed save', 'gold' },
-	{ 'Competitive mode uses a fully completed profile:' },
-	{ 'the whole story, every god, weapon and upgrade.' },
-	{ 'Menus and runs can spoil story and late-game content.' },
-	{ 'Your own save is never loaded, changed or used.', 'grey' },
-	{ 'Race 2-5 players on one seed: same rooms, foes and offers.' },
-	{ 'Vote on route, weapon and keepsake, prep 2 minutes, race.' },
-	{ 'AI disclosure: this mod was developed with AI', 'grey' },
-	{ '(Claude, by Anthropic). It is fully open source:', 'grey' },
+	{ 'Welcome to Hades 2 Competitive Speedrunning', 'gold' },
+	{ 'Warning: Spoilers Ahead' },
+	{ 'H2CS uses a completed save profile.' },
+	{ 'Expect to see endgame story content and dialogue.' },
+	{ 'If you have not rolled credits on Hades 2, turn back now!' },
+	{ '', 'grey' },
+	{ 'Compete in a head-to-head speedrun in a quick match', 'grey' },
+	{ 'Or host a lobby with 5 players', 'grey'},
+	{ 'All players see the same encounters and reward choices', 'grey'},
+	{ '', 'grey' },
+	{ 'AI disclosure: This mod was developed with Claude', 'grey' },
+	{ 'It is fully open source:', 'grey' },
 	{ Board.REPO, 'grey' },
 }
 
@@ -335,16 +338,6 @@ function Board.view(c, ui, now, names)
 			d.cancel = { action = 'home', label = '{CN} Back' }
 			return d
 		end
-		if ui.page == 'practice' then
-			d.id, d.title = 'practice', 'Practice'
-			line('Race a bot: it follows your votes, reports its rooms and never clears first.')
-			line('Solo Run: vote and race on your own, for your splits.', GREY)
-			button('race_bot', 'Race a Bot', 'race_bot')
-			button('solo', 'Solo Run', 'solo')
-			button('back', 'Back', 'home')
-			d.cancel = { action = 'home', label = '{CN} Back' }
-			return d
-		end
 		d.id, d.title = 'home', 'Competitive Speedrun'
 		line('Racing as ' .. Board.safe(c.name))
 		if latest then
@@ -364,7 +357,6 @@ function Board.view(c, ui, now, names)
 		button('find', 'Find Match', 'find')
 		button('create', 'Create Private Race', 'create')
 		button('join_page', 'Race by Code', 'join_page')
-		button('practice', 'Practice', 'practice')
 		button('about', 'About', 'about')
 		if latest or blocked then
 			button('update', 'How to Update', 'update_page')
@@ -421,9 +413,7 @@ function Board.view(c, ui, now, names)
 	end
 	-- Who has voted, and the time left.
 	local function vote_status(v, left)
-		if #rivals == 0 then
-			line('Solo run   -   ' .. left .. 's left')
-		elseif #rivals == 1 then
+		if #rivals == 1 then
 			line('vs ' .. opp .. '   -   ' .. left .. 's left')
 			line((v.voters or {})[rivals[1].id] and (opp .. ' has voted.') or (opp .. ' is choosing...'), GREY)
 		else
@@ -467,7 +457,7 @@ function Board.view(c, ui, now, names)
 				or 'The vote starts when everyone is ready.', GREY)
 			ready_buttons()
 		else
-			line('Waiting for a rival to join, or add a bot.')
+			line('Waiting for a rival to join, or add a bot to race it.')
 		end
 		if not full then button('add_bot', 'Add Bot', 'add_bot') end
 		if n >= 2 then button('chat', 'Chat', 'chat') end
@@ -579,18 +569,10 @@ function Board.view(c, ui, now, names)
 		d.id = 'racing:' .. tostring(dec and dec.you_won) .. ':' .. state .. ':' .. #d.lines
 	elseif phase == 'finished' then
 		local r = st.result or {}
-		local solo = lobby.solo or #(r.results or {}) == 1
 		d.id = 'finished:' .. tostring(st.rematch_requested)
-		if solo then
-			d.title = r.you_won and 'Run Cleared' or 'Run Over'
-			d.title_color = r.you_won and GREEN or RED
-			local e = (r.results or {})[1]
-			if e then line(Board.result_line(e)) end
-		else
-			d.title = r.draw and 'Draw' or (r.you_won and 'Victory' or 'Defeat')
-			d.title_color = r.draw and GOLD or (r.you_won and GREEN or RED)
-			line(REASONS[r.reason] or '', GREY)
-		end
+		d.title = r.draw and 'Draw' or (r.you_won and 'Victory' or 'Defeat')
+		d.title_color = r.draw and GOLD or (r.you_won and GREEN or RED)
+		line(REASONS[r.reason] or '', GREY)
 		if ui.pb_line then line(ui.pb_line, GOLD) end -- your clear against your personal best (game.lua)
 		local results = r.results or {}
 		if #results == 2 then
@@ -606,9 +588,9 @@ function Board.view(c, ui, now, names)
 			local others = waiting_on(function(p) return p.rematch end)
 			line('Rematch requested. Waiting for ' .. (#others > 0 and Board.join_names(others) or 'the others') .. '...', GREY)
 		else
-			button('rematch', solo and 'Run Again' or 'Rematch', 'rematch')
+			button('rematch', 'Rematch', 'rematch')
 		end
-		if not solo then button('chat', 'Chat', 'chat') end
+		button('chat', 'Chat', 'chat')
 		button('leave', 'Leave Race', 'leave')
 	else
 		d.id, d.title = 'phase:' .. tostring(phase), 'Competitive Speedrun'
@@ -620,6 +602,22 @@ end
 -- square around the 0.85-scale aspect icons: x scale, y scale, y offset (its
 -- centre sits a little low). Measured on screenshots.
 Board.WEAPON_FRAME = { 1.1, 0.8, -8 }
+
+-- ButtonDefault's art is about this wide at scale 1 (1080p units, measured on
+-- screenshots); its label gets 85% of it. Small caps run ~0.67 em a letter, so
+-- a longer label stretches its button sideways instead of spilling over. The
+-- buttons of one page (or grid) all take the widest one's stretch, so they line up.
+Board.BUTTON_WIDTH = 268
+function Board.button_stretch(label, font_size, scale)
+	local need = #tostring(label or '') * font_size * 0.67
+	local room = Board.BUTTON_WIDTH * scale * 0.85
+	return need > room and need / room or 1
+end
+function Board.widest_stretch(items, font_size, scale)
+	local most = 1
+	for _, item in ipairs(items or {}) do most = math.max(most, Board.button_stretch(item.label, font_size, scale)) end
+	return most
+end
 
 -- Presses are ignored this long after the board switches to another page.
 Board.SETTLE = 0.8
@@ -676,14 +674,6 @@ function Board:act(action, arg)
 		c:create_lobby()
 	elseif action == 'update_page' then
 		ui.page = 'update'
-	elseif action == 'practice' then
-		ui.page = 'practice'
-	elseif action == 'race_bot' then
-		ui.page = nil
-		c:create_lobby({ bot = true })
-	elseif action == 'solo' then
-		ui.page = nil
-		c:create_lobby({ solo = true })
 	elseif action == 'add_bot' then
 		c:add_bot()
 	elseif action == 'join_page' then
@@ -873,9 +863,10 @@ function Board:render(d)
 	elseif d.grid then
 		local g, n = d.grid, #d.grid.items
 		local words = g.kind == 'words' -- text buttons (chat lines)
-		local step_x = words and 420 or (g.kind == 'weapon' and 150 or (g.kind == 'keys' and 96 or 104))
+		local step_x = words and 460 or (g.kind == 'weapon' and 150 or (g.kind == 'keys' and 96 or 104))
 		local step_y = words and 84 or (g.kind == 'keys' and 90 or 118)
 		local cols = math.min(g.cols, n)
+		local grid_stretch = words and Board.widest_stretch(g.items, 22, 1.0) or 1
 		local x0 = cx - (cols - 1) * step_x / 2
 		local y0 = top + (g.kind == 'weapon' and 60 or 50)
 		-- Behind the buttons, like the Keepsake rack's cursor frame. The frame is
@@ -901,8 +892,9 @@ function Board:render(d)
 			comp.OnMouseOverFunctionName, comp.OnMouseOffFunctionName = 'RankedRace_BoardHover', 'RankedRace_BoardUnhover'
 			G.AttachLua({ Id = comp.Id, Table = comp })
 			if words then
-				G.CreateTextBox(text_args(comp.Id, item.label, 'P22UndergroundSCMedium', 24, { 254, 255, 255, 255 },
-					{ Width = 380, OutlineThickness = 0, ShadowColor = { 0, 0, 0, 0 }, ShadowOffset = { 0, 3 } }))
+				if grid_stretch > 1 and G.SetScaleX then G.SetScaleX({ Id = comp.Id, Fraction = grid_stretch }) end
+				G.CreateTextBox(text_args(comp.Id, item.label, 'P22UndergroundSCMedium', 22, { 254, 255, 255, 255 },
+					{ Width = 440, OutlineThickness = 0, ShadowColor = { 0, 0, 0, 0 }, ShadowOffset = { 0, 3 } }))
 			elseif g.kind == 'keys' then
 				G.SetAnimation({ Name = 'Keepsake_BackingMenu', DestinationId = comp.Id })
 				G.CreateTextBox(text_args(comp.Id, item.label, 'P22UndergroundSCMedium', #item.label > 1 and 22 or 40, BODY))
@@ -933,6 +925,7 @@ function Board:render(d)
 
 	-- Action buttons: a column on list pages, a row under grids.
 	local nb = #d.buttons
+	local stretch = Board.widest_stretch(d.buttons, 26, 1.2)
 	for i, btn in ipairs(d.buttons) do
 		local x, y
 		if d.grid or d.compare or d.table then
@@ -945,6 +938,7 @@ function Board:render(d)
 			x, y = cx, math.max(top + 30, cy - 60) + (i - 1) * 100
 		end
 		local comp = self:component('Button_' .. btn.key, { Name = 'ButtonDefault', X = x, Y = y, Scale = 1.2 })
+		if stretch > 1 and G.SetScaleX then G.SetScaleX({ Id = comp.Id, Fraction = 1.2 * stretch }) end
 		comp.Action, comp.Arg = btn.action, btn.arg
 		comp.Sound = '/SFX/Menu Sounds/GeneralWhooshMENU'
 		G.CreateTextBox(text_args(comp.Id, btn.label, 'P22UndergroundSCMedium', 26, { 254, 255, 255, 255 },

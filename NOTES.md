@@ -203,6 +203,18 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
+- **Encounter counts** (0.6.1): `EncountersCompletedCache` / `EncountersOccurredCache` hold
+  counts, and rooms and boss attacks gate on them: Erebus's `F_MiniBoss02` (Shadow-Spiller) and
+  `F_MiniBoss03` need `MiniBossTreant >= 2`, Hecate's meteor hex needs `BossHecate01 >= 10`,
+  some Chronos attacks `BossTyphonHead02 >= 2`. The profile set every count to 1, so each
+  Erebus run met the Root-Stalker and bosses kept first-encounter movesets (user report: "the
+  first miniboss is always the tree guy"). Now `Profile.ENCOUNTER_COUNT` = 10; the only
+  `<` check (`MiniBossCharybdis` occurred `< 1`) was already false. Profile check: every
+  Erebus miniboss room passes `IsGameStateEligible`.
+- **Button labels** (0.6.1): `ButtonDefault` art is ~268 units wide at scale 1 and its text box
+  doesn't shrink to fit. `Board.button_stretch` estimates a label (small caps ~0.67 em a
+  letter) and `SetScaleX` widens the button; the attached text keeps its shape (screenshots).
+  A page's buttons share the widest stretch so columns line up.
 - **Updates** (0.6.0): `welcome` carries `latest_mod` (`LATEST_MOD_VERSION` in
   `server/src/versions.ts`; a server test keeps it equal to `mod/src/manifest.json`, so bump
   both together). A client older than that shows "Update available" on the board's home page,
@@ -210,14 +222,14 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   (`install/update.sh`: `curl ... | bash`; `install/update.ps1`: `irm ... | iex`). They
   refuse while Hades II runs, download the main branch from codeload.github.com and run the
   installer, which keeps the racer name. The mod itself downloads and runs nothing.
-- **Practice** (0.6.0): `create_lobby` with `solo` starts voting at once with one racer (the
-  minimum for votes, ready and rematch is one; nobody can join). `bot` (or `add_bot` in a
-  private lobby still waiting) adds a house bot: a session with no transport whose
+- **House bots** (0.6.0; 0.6.0's Practice page and solo runs are gone in 0.6.1, the server
+  ignores their `create_lobby` flags): `add_bot` in a private lobby still waiting adds a
+  house bot: a session with no transport whose
   `BotBrain` (`server/src/bot-brain.ts`, shared with mock-client) votes "any", readies,
   reports a room every `botRoomSeconds` (75 s; room names like `F_Bot3`, so the rival plate
   says Erebus), forfeits once someone else clears and clears when every rival is out. Its
   replies are scheduled 400 ms later, never inside the server's own loops. Bots don't count
-  as online and leave with the last person. Gate: `scripts/e2e-practice.sh race_bot|solo`.
+  as online and leave with the last person. Gate: `scripts/e2e-house-bot.sh`.
 - **Rival plate** (`mod/src/hud.lua`, top right, Combat_UI group): HUD fonts/colours, the
   player's `HPBarFill` art (its fraction is the *missing* part), boon icons with
   `Frame_Boon_Menu_<Rarity>`; fades with the game's HUD while `MapState.CombatUIHide` is set.
