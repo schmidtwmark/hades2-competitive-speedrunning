@@ -12,9 +12,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVICE=race-server
 DIR=/data/races
 cd "$ROOT/server" # the linked Railway project
-remote() { railway ssh --service "$SERVICE" -- "$@"; }
+# railway ssh runs its command through a shell on the server: pass one string.
+remote() { railway ssh --service "$SERVICE" -- "$1" | tr -d '\r'; }
 
-list="$(remote sh -c "ls -1t $DIR 2>/dev/null | head -20")"
+list="$(remote "ls -1t $DIR 2>/dev/null | head -20")"
 if [ -z "${1:-}" ]; then
   [ -n "$list" ] || { echo "no races recorded yet"; exit 0; }
   printf '%s\n' "$list" | nl -w2 -s'  '
@@ -25,7 +26,7 @@ if [[ "$1" =~ ^[0-9]+$ ]]; then F="$(printf '%s\n' "$list" | sed -n "${1}p")"; e
 [[ "$F" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "no such race: $1" >&2; exit 1; }
 OUT="$ROOT/local/runs/server-races"
 mkdir -p "$OUT"
-remote sh -c "tar -cz -C $DIR '$F' | base64" | base64 -d | tar -xz -C "$OUT"
+remote "tar -cz -C $DIR $F | base64" | base64 -d | tar -xz -C "$OUT"
 cd "$OUT/$F"
 {
   python3 - <<'PY'
