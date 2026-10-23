@@ -37,6 +37,8 @@
 --   press_competitive_again  also press the title-screen entry after a quit to the menu
 --   expect_rival  a rival of this name must have reported progress by the result
 --   expect_results  how many racers the results list
+--   update_peek   n: on the board's home page, open How to Update for n seconds first
+--                 (the server must report a newer release; screenshots)
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
 
@@ -349,6 +351,20 @@ function Bot:step_wait_game(now, c)
 		if (self.cfg.use_board or self.cfg.role == 'pad') and not (self.board and self.board:is_open()) then
 			self:use_stone(now)
 			return
+		end
+		-- update_peek: How to Update first, like a player reading it, then back.
+		local peek = self.cfg.update_peek
+		if peek and self.cfg.use_board and not self.update_back then
+			if not self.update_opened then
+				self.update_opened = now
+				self:queue_press('update')
+				return
+			end
+			if now - self.update_opened < peek then return end
+			local d = self.board and self.board.desc
+			self:check('How to Update page shown', d and d.id == 'update', d and tostring(d.id))
+			self.update_back = true
+			self:queue_press('back')
 		end
 		if self.cfg.role == 'pad' then
 			self:go_step('pad_lobby')

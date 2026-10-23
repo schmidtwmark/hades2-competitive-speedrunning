@@ -329,7 +329,7 @@ function Board.view(c, ui, now, names)
 			d.lines[#d.lines + 1] = { text = Board.UPDATE.linux, size = 18, width = 1100 }
 			line('Windows (PowerShell):', GREY)
 			d.lines[#d.lines + 1] = { text = Board.UPDATE.windows, size = 18, width = 1100 }
-			line('Both are on ' .. Board.UPDATE.url .. ', under Updating.', GREY)
+			line('Both commands: ' .. Board.UPDATE.url, GREY)
 			line('Your racer name and settings stay.', GREY)
 			button('back', 'Back', 'home')
 			d.cancel = { action = 'home', label = '{CN} Back' }

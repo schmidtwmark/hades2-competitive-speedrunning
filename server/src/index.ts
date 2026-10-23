@@ -16,6 +16,7 @@ const server = new RaceServer({
   maxPlayers: Number(env.MAX_PLAYERS ?? 5),
   matchPlayers: Number(env.MATCH_PLAYERS ?? 2),
   botRoomSeconds: Number(env.BOT_ROOM_SECONDS ?? 75),
+  latestModVersion: env.LATEST_MOD_VERSION || undefined, // tests: pretend a newer release exists
   pools: { route: routes(env.ROUTES), weapon: WEAPONS, keepsake: KEEPSAKES },
   prepMs: Number(env.PREP_SECONDS ?? 120) * 1000,
   fixedSeed: env.RACE_SEED ? Number(env.RACE_SEED) : undefined,

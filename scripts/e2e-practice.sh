@@ -6,6 +6,8 @@
 # readies, clears the run and checks the result (and, against the house bot,
 # that it reported its rooms and that the keepsake vote named the weapon pick).
 #   scripts/e2e-practice.sh [race_bot|solo] [rooms]
+# BOT_EXTRA='"update_peek":8' adds bot.json fields; server env vars (e.g.
+# LATEST_MOD_VERSION=9.9.9) pass through to the local server.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${BAZZITE:-bazzite.local}"
@@ -44,7 +46,7 @@ cat >"$RUN/bot.json" <<JSON
 {"role":"$MODE","name":"PracticeBot","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,"use_board":true,
  "route":"underworld","weapon":"WeaponDagger","keepsake":"LowHealthCritKeepsake",
  "outcome":"win","clear_screen":true,"expect":"win","expect_reason":"completed_first",$EXTRA,"expect_results_screen":true,
- "timeout":$((TIMEOUT - 60)),"quit_after":5,"press_competitive_after":3,"expect_competitive":true,"reset_to_hub":false}
+ "timeout":$((TIMEOUT - 60)),"quit_after":5,"press_competitive_after":3,"expect_competitive":true,"reset_to_hub":false${BOT_EXTRA:+,$BOT_EXTRA}}
 JSON
 ssh "$HOST" "mkdir -p '$DATA' && rm -f '$DATA/bot-result.txt' '$DATA/trace.json' '$DATA/ranked.log' && cat > '$DATA/bot.json'" <"$RUN/bot.json" || fail "bot.json"
 ssh "$HOST" "$TB/instance.sh stop A >/dev/null; $TB/instance.sh start A /Windowed=true /Fullscreen=false /X=1280 /Y=720 /RequireFocusToUpdate=false" || fail "launch"
