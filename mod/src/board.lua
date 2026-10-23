@@ -65,8 +65,7 @@ Board.QUICK_LINES = { 'GG', 'Good luck!', 'Nice!', 'Oops', 'Well played', 'Remat
 Board.REPO = 'github.com/schmidtwmark/hades2-ranked-race'
 -- Lines stay under ~60 characters: longer ones wrap onto the next line.
 Board.WELCOME_LINES = {
-	{ 'Welcome to Hades 2 Competitive Speedrunning', 'gold' },
-	{ 'Warning: Spoilers Ahead' },
+	{ 'Warning: Spoilers Ahead', 'gold' },
 	{ 'H2CS uses a completed save profile.' },
 	{ 'Expect to see endgame story content and dialogue.' },
 	{ 'If you have not rolled credits on Hades 2, turn back now!' },
@@ -273,7 +272,7 @@ function Board.view(c, ui, now, names)
 
 	-- First open (and About): what this is, spoilers and the AI disclosure.
 	if ui.welcome then
-		d.id, d.title = 'welcome', 'Welcome to Ranked Race'
+		d.id, d.title = 'welcome', 'Hades 2 Competitive Speedrunning'
 		for _, l in ipairs(Board.WELCOME_LINES) do
 			line(l[1], l[2] == 'gold' and GOLD or (l[2] == 'grey' and GREY or nil))
 		end
