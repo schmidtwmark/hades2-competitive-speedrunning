@@ -204,7 +204,9 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
 - **Store identity** (0.6.3, `identity.lua`): the name and player key come from the store
-  account. Steam: steam_api64.dll's exports, found by walking its PE export table
+  account. Verified 2026-10-24 on the owner's bazzite install (launched by Steam): the SteamID64
+  and persona name read at the Crossroads hello, the live server logged the steam key. The test
+  bed's games run outside Steam, so there `SteamAPI_SteamUser` returns no user. Steam: steam_api64.dll's exports, found by walking its PE export table
   (`get_module_base_address` + `get_dword` / `get_word` / `get_string`; no Hades2.exe signature):
   `SteamAPI_SteamUser_v0xx()` gives ISteamUser; its vtable slot 2 (`+0x10`) is GetSteamID, which
   returns the CSteamID through a hidden pointer (Hades2.exe's `SteamWrapper::GetSteamId` calls it
