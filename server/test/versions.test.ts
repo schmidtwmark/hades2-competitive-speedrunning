@@ -93,7 +93,7 @@ describe("version checks on the server", () => {
     b.send({ type: "join_lobby", code: a.last("lobby_created").code });
     assert.equal(b.last("error").who, "rival");
     assert.equal(a.last("error").who, "you");
-    assert.match(a.last("error").message, /update Ranked Race \(you have 0\.6\.0, they have 0\.7\.1\)/);
+    assert.match(a.last("error").message, /update Hades 2 Competitive Speedrunning \(you have 0\.6\.0, they have 0\.7\.1\)/);
     const c = hello(server, "C", "0.6.2", SEP23);
     c.send({ type: "join_lobby", code: a.last("lobby_created").code });
     assert.equal(c.last("lobby_joined").opponent, "A");

@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${BAZZITE:-bazzite.local}"
 ROOMS="${1:-2}"
 TIMEOUT="${E2E_TIMEOUT:-600}"
-GUID="schmidtwmark-RankedRace"
+GUID="schmidtwmark-Hades_2_Competitive_Speedrunning"
 PORT=$((20000 + RANDOM % 20000))
 RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-pad"
 mkdir -p "$RUN"

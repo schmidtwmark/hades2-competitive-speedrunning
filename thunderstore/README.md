@@ -1,11 +1,14 @@
-# Hades II Ranked Race
+# Hades 2 Competitive Speedrunning (Beta)
 
 Race your friends through Hades II. Two to five players vote on a route, a weapon and a
 keepsake, then start the **same seeded run at the same moment**: the same rooms, foes,
 rewards, gods, boon offers and shop stock for everyone, as far as each build allows. First
 to clear wins.
 
-![The Race Board: a private race, ready to vote](https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/docs/screenshots/board.jpg)
+**Beta:** it runs real races, but expect rough edges. Please report bugs on
+[GitHub](https://github.com/schmidtwmark/hades2-competitive-speedrunning/issues).
+
+![The Race Board: a private race, ready to vote](https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/docs/screenshots/board.jpg)
 
 ## Features
 
@@ -25,24 +28,24 @@ to clear wins.
 - **Quick chat only** (GG, Good luck!, ...): no free text, so nobody can send you anything else.
 - **Controller first:** everything is native Hades UI; no keyboard needed.
 
-![Voting on the keepsake](https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/docs/screenshots/vote.jpg)
+![Voting on the keepsake](https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/docs/screenshots/vote.jpg)
 
-![A rival's shadow and the rival plate](https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/docs/screenshots/race.jpg)
+![A rival's shadow and the rival plate](https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/docs/screenshots/race.jpg)
 
-![The results](https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/docs/screenshots/results.jpg)
+![The results](https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/docs/screenshots/results.jpg)
 
 ## Install
 
-1. In **r2modman** or **Gale**, pick Hades II and install **Ranked Race** (it brings
+1. In **r2modman** or **Gale**, pick Hades II and install **Hades 2 Competitive Speedrunning** (it brings
    Hell2Modding and ModUtil with it).
 2. **Steam Deck / Linux only:** in Steam, set the Hades II launch options (Library →
    right-click Hades II → Properties → Launch Options) to
    `WINEDLLOVERRIDES="d3d12=n,b" %command%`. Proton otherwise loads its own `d3d12.dll`
    and the mod loader never starts. Windows needs nothing here.
-3. Launch through the mod manager (**Start modded**) and pick **Play Competitive Speedrun**
-   on the title screen. The Race Board is at the Pitch-Black Stone in the Crossroads.
+3. Launch through the mod manager (**Start modded**) and pick **Play Competitive Speedrun
+   (Beta)** on the title screen. The Race Board is at the Pitch-Black Stone in the Crossroads.
 
-Every racer needs Ranked Race, on the same Hades II version. Update in your mod manager when
+Every racer needs Hades 2 Competitive Speedrunning, on the same Hades II version. Update in your mod manager when
 a new version is out; the Race Board says when one is.
 
 ## Good to know
@@ -57,6 +60,6 @@ a new version is out; the Race Board says when one is.
 
 ## About
 
-Open source: [github.com/schmidtwmark/hades2-ranked-race](https://github.com/schmidtwmark/hades2-ranked-race),
+Open source: [github.com/schmidtwmark/hades2-competitive-speedrunning](https://github.com/schmidtwmark/hades2-competitive-speedrunning),
 where you can also report problems. AI disclosure: this mod was developed with Claude
 (Anthropic). Hades II and its assets belong to Supergiant Games.

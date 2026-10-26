@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Ranked Race for Hades II on Linux / Steam Deck (Steam + Proton).
+# Install Hades 2 Competitive Speedrunning (beta) for Hades II on Linux / Steam Deck (Steam + Proton).
 #
 #   install/install.sh                 install or update
 #   install/install.sh --uninstall     remove it again
@@ -18,7 +18,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GUID="schmidtwmark-RankedRace"
+GUID="schmidtwmark-Hades_2_Competitive_Speedrunning"
+OLD_GUID="schmidtwmark-RankedRace" # the mod's folder name before 0.6.6
 MARKER=".ranked-race-install"
 LAUNCH_OPTIONS='WINEDLLOVERRIDES="d3d12=n,b" %command% --rom_enabled true'
 GAME_DIR=""
@@ -76,7 +77,7 @@ if [ "$MODE" = uninstall ]; then
     run rm -rf "$ROM"
     say "removed $ROM"
   else
-    run rm -rf "$PLUGINS/$GUID"
+    run rm -rf "$PLUGINS/$GUID" "$PLUGINS/$OLD_GUID"
     say "removed $PLUGINS/$GUID (ReturnOfModding was there before this installer, so the rest stays)"
   fi
   if [ -f "$SHIP/d3d12.dll.before-ranked-race" ]; then
@@ -128,10 +129,22 @@ for dir in "$WORK"/x/*; do
   run rm -rf "$PLUGINS/$guid"
   run cp -R "$dir" "$PLUGINS/$guid"
 done
+# Before 0.6.6 the mod lived in schmidtwmark-RankedRace: drop that copy (both
+# would load) and carry its data (bests, loadout, race logs) and config (name) over.
+if [ -d "$PLUGINS/$OLD_GUID" ]; then
+  run rm -rf "$PLUGINS/$OLD_GUID"
+  say "removed the old $OLD_GUID copy"
+fi
+for kind in plugins_data config; do
+  if [ -d "$ROM/$kind/$OLD_GUID" ] && [ ! -e "$ROM/$kind/$GUID" ]; then
+    run mv "$ROM/$kind/$OLD_GUID" "$ROM/$kind/$GUID"
+    say "moved $kind/$OLD_GUID to $kind/$GUID"
+  fi
+done
 run rm -rf "$PLUGINS/$GUID"
 run mkdir -p "$PLUGINS/$GUID"
 run cp -R "$ROOT/mod/src/." "$PLUGINS/$GUID/"
-say "installed Hell2Modding + ModUtil + Ranked Race into $ROM"
+say "installed Hell2Modding + ModUtil + Hades 2 Competitive Speedrunning into $ROM"
 
 # Skip Hell2Modding's first-launch welcome window: it holds the controller
 # until it's dismissed, before the player ever reaches the race menu.

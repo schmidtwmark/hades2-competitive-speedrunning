@@ -1,7 +1,11 @@
 # Changelog
 
+## 0.6.6 (beta)
+- First release on Thunderstore, as Hades 2 Competitive Speedrunning (H2CS), a beta.
+- Installed with the script before? It moves your bests, loadout and name to the new
+  mod folder (schmidtwmark-Hades_2_Competitive_Speedrunning) and removes the old one.
+
 ## 0.6.5
-- First release on Thunderstore.
 - How to Update points mod-manager installs at their mod manager.
 
 ## 0.6.4

@@ -203,8 +203,16 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
+- **Name** (0.6.6): the mod is Hades 2 Competitive Speedrunning (H2CS; "H2CS" where a board line
+  would wrap), a beta. The GitHub repo is `schmidtwmark/hades2-competitive-speedrunning` (renamed from
+  hades2-ranked-race; GitHub still serves the old raw/codeload URLs, which 0.6.0-0.6.5's How to Update
+  shows). The package is `Hades_2_Competitive_Speedrunning` (Thunderstore shows underscores as
+  spaces), so the plugin folder is `schmidtwmark-Hades_2_Competitive_Speedrunning`; the installers
+  remove the old `schmidtwmark-RankedRace` plugin folder (two copies would load) and move its
+  `plugins_data` and `config` folders over. Internal names (`RankedRace_*` globals, MapState keys,
+  the Railway project `hades2-ranked-race`) stay.
 - **Thunderstore release** (prepared 0.6.4, not yet published): `scripts/thunderstore-package.sh` builds
-  `build/schmidtwmark-RankedRace-<version>.zip` (flat: mod/src, `thunderstore/` icon + README +
+  `build/schmidtwmark-Hades_2_Competitive_Speedrunning-<version>.zip` (flat: mod/src, `thunderstore/` icon + README +
   CHANGELOG, LICENSE; the layout of SGG_Modding-ModUtil's package) and `build/thunderstore.toml`
   for tcli, both from `mod/src/manifest.json`, after checking Thunderstore's rules (name, Major.
   Minor.Patch, description <= 250, website_url, `Team-Name-x.y.z` dependencies = install/packages.txt

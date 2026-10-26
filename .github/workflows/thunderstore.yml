@@ -1,4 +1,4 @@
-# Publish Ranked Race to Thunderstore (thunderstore.io/c/hades-ii). Run it by
+# Publish Hades 2 Competitive Speedrunning to Thunderstore (thunderstore.io/c/hades-ii). Run it by
 # hand from the Actions tab once the version in mod/src/manifest.json (and
 # LATEST_MOD_VERSION, main.lua's VERSION and thunderstore/CHANGELOG.md) is bumped
 # and pushed. The default is a dry run: build and check the package, keep the
@@ -45,7 +45,7 @@ jobs:
         working-directory: build # tcli reads thunderstore.toml from here
         env:
           TCLI_AUTH_TOKEN: ${{ secrets.TCLI_AUTH_TOKEN }}
-        run: tcli publish --file schmidtwmark-RankedRace-*.zip
+        run: tcli publish --file schmidtwmark-Hades_2_Competitive_Speedrunning-*.zip
 
       - name: Tag the release
         if: ${{ !inputs.dry-run }}

@@ -1,4 +1,4 @@
--- ImGui overlay: the Ranked Race window (lobby, votes, ready, result) and the
+-- ImGui overlay: the H2CS window (lobby, votes, ready, result) and the
 -- opponent HUD shown during a race. Draws only from client state; every button
 -- maps to one client action.
 
@@ -68,7 +68,7 @@ function UI:draw_window()
 	local ImGui = self.ImGui
 	ImGui.SetNextWindowPos(self.config.window_x or 300, self.config.window_y or 40, self.Cond.FirstUseEver)
 	ImGui.SetNextWindowSize(420, 360, self.Cond.FirstUseEver)
-	local shown = ImGui.Begin('Ranked Race (F8)')
+	local shown = ImGui.Begin('H2CS (F8)')
 	if shown then
 		local ok, err = pcall(self.draw_body, self)
 		if not ok then self:report('UI', err) end

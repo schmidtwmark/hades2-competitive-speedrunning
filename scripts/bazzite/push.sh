@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HOST="${BAZZITE:-bazzite.local}"
 TB='h2r-testbed'
 PKG="$ROOT/local/thunderstore/x"
-GUID="schmidtwmark-RankedRace"
+GUID="schmidtwmark-Hades_2_Competitive_Speedrunning"
+OLD_GUID="schmidtwmark-RankedRace" # the folder name before 0.6.6: removed so it doesn't load twice
 
 ssh "$HOST" "mkdir -p $TB/h2m $TB/rom-A/ReturnOfModding/plugins $TB/rom-B/ReturnOfModding/plugins"
 rsync -a "$ROOT/scripts/bazzite/instance.sh" "$ROOT/scripts/bazzite/testbed-setup.sh" "$ROOT/scripts/bazzite/pad.py" "$HOST:$TB/"
@@ -19,6 +20,7 @@ for X in A B; do
     guid="${name%-*}" # strip -<version>
     rsync -a --delete "$dir/" "$HOST:$TB/rom-$X/ReturnOfModding/plugins/$guid/"
   done
+  ssh "$HOST" "rm -rf $TB/rom-$X/ReturnOfModding/plugins/$OLD_GUID"
   rsync -a --inplace --delete --exclude ".DS_Store" "$ROOT/mod/src/" "$HOST:$TB/rom-$X/ReturnOfModding/plugins/$GUID/"
 done
 echo "pushed $(cd "$ROOT/mod/src" && ls | wc -l | tr -d ' ') mod files + deps to $HOST:$TB/rom-{A,B}"

@@ -1,4 +1,4 @@
--- Hell2Modding entry point for Ranked Race.
+-- Hell2Modding entry point for Hades 2 Competitive Speedrunning (H2CS).
 -- Loaded once per game launch (and again on hot reload) inside this plugin's
 -- private environment. Game globals (CurrentRun, ...) live on rom.game.
 
@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.6.5'
+local VERSION = '0.6.6'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -49,7 +49,7 @@ local function log(line)
 		log_file:flush()
 	end
 end
-log('=== Ranked Race ' .. VERSION .. ' loading (' .. guid .. ')')
+log('=== Hades 2 Competitive Speedrunning ' .. VERSION .. ' loading (' .. guid .. ')')
 
 -- config: a Lua table file in the plugin's config folder ------------------------
 
@@ -234,7 +234,7 @@ game:install_hooks()
 if bot.active and bot.cfg.trace_functions then game:install_tracers(bot.cfg.trace_functions) end
 if bot.active and bot.cfg.probe_doors then game.probe_doors = true end
 
--- Title screen entry "Play Competitive Speedrun" (native hook; see competitive.lua).
+-- Title screen entry "Play Competitive Speedrun (Beta)" (native hook; see competitive.lua).
 -- Never let it take the rest of the mod down.
 local competitive = Competitive.new({ rom = rom, log = log, on_start = function() game:enter_competitive() end })
 game.stop_menu_music = function() competitive:stop_menu_music(1.0) end
@@ -288,7 +288,7 @@ local function show_window()
 	if not rom.gui.is_open() then rom.gui.toggle() end
 end
 if rom.inputs and rom.inputs.on_key_pressed then
-	rom.inputs.on_key_pressed{ 'F8', Name = 'Ranked Race window', show_window }
+	rom.inputs.on_key_pressed{ 'F8', Name = 'H2CS window', show_window }
 end
 
 -- Hell2Modding's overlay takes all game input while it is open and only its
@@ -344,7 +344,7 @@ end
 rom.gui.add_always_draw_imgui(guarded(frame))
 rom.gui.add_imgui(guarded(function() ui:draw_window() end))
 rom.gui.add_to_menu_bar(function()
-	if rom.ImGui.MenuItem('Ranked Race (F8)') then ui:toggle() end
+	if rom.ImGui.MenuItem('H2CS (F8)') then ui:toggle() end
 	if rom.ImGui.MenuItem('Close (B on a controller)') then rom.gui.toggle() end
 end)
 

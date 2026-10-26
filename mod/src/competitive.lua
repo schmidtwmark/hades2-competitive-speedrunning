@@ -5,7 +5,7 @@
 -- "AnnouncementButton" whose only callback is MainMenuScreen::OpenPatchNotes
 -- (rva 0x16cda0 on build 25481925, no other callers). We:
 --   1. rewrite MainMenuScreen.sjson so that button shows under PLAY as
---      "Play Competitive Speedrun" (ShellText gets the new string), and
+--      "Play Competitive Speedrun (Beta)" (ShellText gets the new string), and
 --   2. hook OpenPatchNotes natively (found by a unique byte signature) so the
 --      press starts competitive mode instead of opening patch notes.
 -- If the signature isn't found (different game build) nothing is changed.
@@ -38,7 +38,7 @@ local PAUSE_RESUME_SIG = '48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 
 -- Loading a save stops that music; the competitive entry has to stop it.
 local MENU_MUSIC_STORE_SIG = '41 B9 FF FF FF FF 48 8D 55 B7 48 8D 4D D7 E8 ?? ?? ?? ?? 89 05 ?? ?? ?? ??'
 local TEXT_ID = 'MainMenuScreen_CompetitiveSpeedrun'
-local LABEL = 'Play Competitive Speedrun'
+local LABEL = 'Play Competitive Speedrun (Beta)'
 local FORFEIT_LABEL = 'Race Menu'
 local FORFEIT_HINT = 'end your run? your rival still has to finish to win'
 

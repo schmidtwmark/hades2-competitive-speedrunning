@@ -1,5 +1,5 @@
 <#
-Install Ranked Race for Hades II on Windows (Steam).
+Install Hades 2 Competitive Speedrunning (beta) for Hades II on Windows (Steam).
 
   powershell -ExecutionPolicy Bypass -File install\install.ps1              install or update
   powershell -ExecutionPolicy Bypass -File install\install.ps1 -Uninstall   remove it again
@@ -27,7 +27,8 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is very slow with the progress bar on 5.1
 
 $Root = Split-Path -Parent $PSScriptRoot
-$Guid = "schmidtwmark-RankedRace"
+$Guid = "schmidtwmark-Hades_2_Competitive_Speedrunning"
+$OldGuid = "schmidtwmark-RankedRace"   # the mod's folder name before 0.6.6
 $Marker = ".ranked-race-install"
 $LaunchOptions = "%command% --rom_enabled true"
 
@@ -89,7 +90,9 @@ if ($Uninstall) {
         Say "removed $Rom"
     } else {
         $mine = Join-Path $Plugins $Guid
-        Act "remove $mine" { if (Test-Path $mine) { Remove-Item -Recurse -Force $mine } }
+        Act "remove $mine" {
+            foreach ($p in @($mine, (Join-Path $Plugins $OldGuid))) { if (Test-Path $p) { Remove-Item -Recurse -Force $p } }
+        }
         Say "removed $mine (ReturnOfModding was there before this installer, so the rest stays)"
     }
     if (Test-Path $DllBackup) {
@@ -143,13 +146,22 @@ try {
             Copy-Item -Recurse -Force $dir.FullName $dest
         }
     }
+    # Before 0.6.6 the mod lived in schmidtwmark-RankedRace: drop that copy (both
+    # would load) and carry its data (bests, loadout, race logs) and config (name) over.
+    $oldMine = Join-Path $Plugins $OldGuid
+    if (Test-Path $oldMine) { Act "remove the old $OldGuid copy" { Remove-Item -Recurse -Force $oldMine } }
+    foreach ($kind in @("plugins_data", "config")) {
+        $old = Join-Path $Rom "$kind\$OldGuid"
+        $new = Join-Path $Rom "$kind\$Guid"
+        if ((Test-Path $old) -and -not (Test-Path $new)) { Act "move $kind\$OldGuid to $kind\$Guid" { Move-Item $old $new } }
+    }
     $mine = Join-Path $Plugins $Guid
     Act "install $Guid" {
         if (Test-Path $mine) { Remove-Item -Recurse -Force $mine }
         New-Item -ItemType Directory -Force -Path $mine | Out-Null
         Copy-Item -Recurse -Force (Join-Path $Root "mod\src\*") $mine
     }
-    Say "installed Hell2Modding + ModUtil + Ranked Race into $Rom"
+    Say "installed Hell2Modding + ModUtil + Hades 2 Competitive Speedrunning into $Rom"
 
     # Skip Hell2Modding's first-launch welcome window: it holds the controller
     # until it's dismissed, before the player ever reaches the race menu.

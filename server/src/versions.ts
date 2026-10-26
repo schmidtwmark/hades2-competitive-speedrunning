@@ -1,4 +1,4 @@
-// Who may race whom. Both racers need a compatible Ranked Race (same
+// Who may race whom. Both racers need a compatible Hades 2 Competitive Speedrunning (same
 // major.minor, at least MIN_MOD_VERSION) and the identical Hades II build:
 // the mod hooks native code by signature and the per-depth RNG only lines up
 // on the same game scripts. The game build is the executable's PE link time
@@ -11,10 +11,10 @@ export const MIN_MOD_VERSION = "0.6.0";
  * The newest mod release (mod/src/manifest.json; a test keeps them equal).
  * Clients older than this offer the player the update command.
  */
-export const LATEST_MOD_VERSION = "0.6.5";
+export const LATEST_MOD_VERSION = "0.6.6";
 
 export interface ClientVersions {
-  /** Ranked Race version, e.g. "0.5.0" (anything unparsable counts as unknown). */
+  /** Mod version, e.g. "0.5.0" (anything unparsable counts as unknown). */
   mod: string | null;
   /** Hades II build: the game executable's link time, seconds since 1970. */
   gameBuild: number | null;
@@ -69,8 +69,8 @@ export function buildDate(build: number | null): string {
 export function mismatchMessage(m: Mismatch, me: ClientVersions, rival: ClientVersions, rivalName: string, meOlder: boolean): string {
   if (m.what === "mod") {
     return meOlder
-      ? `Can't race ${rivalName}: update Ranked Race (you have ${me.mod}, they have ${rival.mod}).`
-      : `Can't race ${rivalName}: they need to update Ranked Race (they have ${rival.mod}, you have ${me.mod}).`;
+      ? `Can't race ${rivalName}: update Hades 2 Competitive Speedrunning (you have ${me.mod}, they have ${rival.mod}).`
+      : `Can't race ${rivalName}: they need to update Hades 2 Competitive Speedrunning (they have ${rival.mod}, you have ${me.mod}).`;
   }
   return meOlder
     ? `Can't race ${rivalName}: update Hades II in Steam (your game build ${buildDate(me.gameBuild)} is older than theirs, ${buildDate(rival.gameBuild)}).`
@@ -78,5 +78,5 @@ export function mismatchMessage(m: Mismatch, me: ClientVersions, rival: ClientVe
 }
 
 export function tooOldMessage(v: string | null, min = MIN_MOD_VERSION): string {
-  return `Ranked Race ${v} is too old for the race server: update to ${min} or newer (git pull in the mod folder, then run the installer again).`;
+  return `Hades 2 Competitive Speedrunning ${v} is too old for the race server: update to ${min} or newer (How to Update on the Race Board, or your mod manager).`;
 }

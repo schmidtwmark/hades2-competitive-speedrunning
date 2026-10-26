@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build Ranked Race's Thunderstore upload and check it against Thunderstore's
+# Build Hades 2 Competitive Speedrunning's Thunderstore upload and check it against Thunderstore's
 # package format. mod/src/manifest.json is the one source of the name, version,
 # description and dependencies; thunderstore/ holds the icon, the store README
 # and the changelog. Writes, in build/ (or $OUT):
-#   schmidtwmark-RankedRace-<version>.zip   flat zip: manifest.json, icon.png,
+#   schmidtwmark-Hades_2_Competitive_Speedrunning-<version>.zip   flat zip: manifest.json, icon.png,
 #                                          README.md, CHANGELOG.md, LICENSE, the mod
 #   thunderstore.toml                      the matching tcli config, for publishing
 # Publishing needs a service-account token of the Thunderstore team
-# "schmidtwmark" (the plugin folder is schmidtwmark-RankedRace):
+# "schmidtwmark" (the plugin folder is schmidtwmark-Hades_2_Competitive_Speedrunning):
 #   TCLI_AUTH_TOKEN=... tcli publish --config-path build/thunderstore.toml --file build/<zip>
 # .github/workflows/thunderstore.yml runs both.
 #   scripts/thunderstore-package.sh

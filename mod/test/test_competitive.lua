@@ -34,7 +34,7 @@ T.case('shell text: adds the label once, before Play', function()
 	local a = out:find('MainMenuScreen_CompetitiveSpeedrun', 1, true)
 	local b = out:find('"MainMenuScreen_PlayGame"', 1, true)
 	T.truthy(a and b and a < b)
-	T.truthy(out:find('DisplayName = "Play Competitive Speedrun"', 1, true))
+	T.truthy(out:find('DisplayName = "Play Competitive Speedrun (Beta)"', 1, true))
 	if shell:find('PauseScreen_Abandon', 1, true) then
 		T.truthy(out:find('Id = "PauseScreen_Abandon"%s*DisplayName = "Race Menu"'), 'Undo Night relabelled')
 		T.truthy(out:find('Id = "PauseScreen_GiveUp_ValidCheckpoint"%s*DisplayName = "end your run'), 'hint relabelled')

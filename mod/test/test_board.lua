@@ -470,7 +470,7 @@ T.case('board: a version mismatch says who updates what, and opens the board', f
 	T.truthy(Board.wants_attention(d.id))
 	T.eq(keys(d.buttons), 'find,create,join_page,about', 'still can search again')
 	local them = Board.mismatch_lines({ code = 'version_mismatch', who = 'rival', what = 'mod', rival = 'Zag' })
-	T.eq(them[2].text, "Zag's Ranked Race is out of date.")
+	T.eq(them[2].text, "Zag's Hades 2 Competitive Speedrunning is out of date.")
 	local old = Board.mismatch_lines({ code = 'update_required', who = 'you', what = 'mod' })
 	T.truthy(old[3].text:find('How to Update'))
 	-- Find Match next to an incompatible searcher: our own lobby says why we're alone.
@@ -581,7 +581,7 @@ T.case('board: first open shows the welcome (spoilers first, AI disclosure); Abo
 	all = table.concat(all, ' | ')
 	T.truthy(all:find('AI'), 'AI disclosure')
 	T.truthy(all:find('open source'), 'open source')
-	T.truthy(all:find('github.com/schmidtwmark/hades2-ranked-race', 1, true), 'repo link')
+	T.truthy(all:find('github.com/schmidtwmark/hades2-competitive-speedrunning', 1, true), 'repo link')
 	T.eq(Board.wants_attention(b.desc.id), false, 'the welcome waits for the stone')
 	b:press('continue')
 	T.eq(seen, 1)
@@ -644,13 +644,13 @@ T.case('board: the matchmaking pages say how many racers are online', function()
 	T.truthy(has(d, '4 racers online: 1 searching, 2 racing'), 'finding rivals page')
 end)
 
-T.case('board: an older Ranked Race says so on the home page and in the race menu; How to Update shows the commands', function()
+T.case('board: an older version says so on the home page and in the race menu; How to Update shows the commands', function()
 	local c, f, b = make()
 	c.version = '0.6.0'
 	f.push({ type = 'welcome', id = 'p1', token = 't', resumed = false, latest_mod = '0.6.1' })
 	b.desc = view(c, b)
 	T.eq(b.desc.id, 'home:update')
-	T.eq(b.desc.lines[2].text, 'Update available: Ranked Race 0.6.1 (you have 0.6.0).')
+	T.eq(b.desc.lines[2].text, 'Update available: H2CS 0.6.1 (you have 0.6.0).')
 	T.eq(keys(b.desc.buttons), 'find,create,join_page,about,update')
 	T.eq(b.desc.button_cols, 2)
 	T.eq(b.desc.focus, nil, 'Find Match keeps the focus: the update can wait')
@@ -663,7 +663,7 @@ T.case('board: an older Ranked Race says so on the home page and in the race men
 	text = table.concat(text, '\n')
 	T.truthy(text:find(Board.UPDATE.linux, 1, true), 'the Linux / Deck command')
 	T.truthy(text:find(Board.UPDATE.windows, 1, true), 'the Windows command')
-	T.truthy(text:find('github.com/schmidtwmark/hades2-ranked-race', 1, true))
+	T.truthy(text:find('github.com/schmidtwmark/hades2-competitive-speedrunning', 1, true))
 	b:press('cancel')
 	T.eq(view(c, b).id, 'home:update')
 	b.ui.prompt = 'race'
@@ -742,13 +742,13 @@ end)
 
 T.case('board: a mod-manager install is told to update there, an installer install gets the commands', function()
 	local kinds = {
-		['C:\\Users\\Mel\\AppData\\Roaming\\r2modmanPlus-local\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manager',
-		['Z:\\home\\deck\\.config\\r2modmanPlus-local\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manager',
-		['C:\\Users\\Mel\\AppData\\Roaming\\com.kesomannen.gale\\hades-ii\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manager',
+		['C:\\Users\\Mel\\AppData\\Roaming\\r2modmanPlus-local\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-Hades_2_Competitive_Speedrunning'] = 'manager',
+		['Z:\\home\\deck\\.config\\r2modmanPlus-local\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-Hades_2_Competitive_Speedrunning'] = 'manager',
+		['C:\\Users\\Mel\\AppData\\Roaming\\com.kesomannen.gale\\hades-ii\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-Hades_2_Competitive_Speedrunning'] = 'manager',
 		['C:\\Users\\Mel\\AppData\\Roaming\\Thunderstore Mod Manager\\DataFolder\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\x'] = 'manager',
-		['S:\\steamapps\\common\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manual',
-		['C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manual',
-		['C:\\Users\\Galen\\Games\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manual',
+		['S:\\steamapps\\common\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-Hades_2_Competitive_Speedrunning'] = 'manual',
+		['C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-Hades_2_Competitive_Speedrunning'] = 'manual',
+		['C:\\Users\\Galen\\Games\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-Hades_2_Competitive_Speedrunning'] = 'manual',
 	}
 	for path, want in pairs(kinds) do T.eq(Board.install_kind(path), want, path) end
 	local c, f, b = make()

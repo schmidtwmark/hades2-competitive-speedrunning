@@ -1,6 +1,6 @@
-# Hades II Ranked Race
+# Hades 2 Competitive Speedrunning (Beta)
 
-A race mod for Hades II for two to five players. Racers meet on the in-game
+Hades 2 Competitive Speedrunning (H2CS) is a race mod for Hades II for two to five players. Racers meet on the in-game
 Race Board, vote on the route (Underworld, Surface or Dream Dive), a weapon and a keepsake,
 get two minutes to set Arcana, aspect and familiar, and start the same seeded
 run at the same moment. Every racer is offered the same rooms, foes, rewards,
@@ -13,6 +13,9 @@ are, their HP and (in a 1v1) their boons, under a single real-time race clock
 that never pauses (the game's own timer, which stops for menus and boon
 choices, is hidden). Everything works with a controller; no keyboard or mod
 keys needed.
+
+**Beta:** it runs real races, but expect rough edges. Please report bugs in
+[Issues](https://github.com/schmidtwmark/hades2-competitive-speedrunning/issues).
 
 ![The Race Board: a private race, ready to vote](docs/screenshots/board.jpg)
 
@@ -40,8 +43,8 @@ has step-by-step instructions for an AI agent installing it for you.
 
 **Updating** (with the game closed; your name and settings stay):
 
-- Linux / Steam Deck: `curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.sh | bash`
-- Windows (PowerShell): `irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex`
+- Linux / Steam Deck: `curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.sh | bash`
+- Windows (PowerShell): `irm https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.ps1 | iex`
 
 Competitive mode gives both players the same fully maxed profile (every weapon, aspect, keepsake,
 familiar and Arcana card at max rank, Grasp 30, Fear 0) built in memory; it never reads or writes

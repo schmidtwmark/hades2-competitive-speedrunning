@@ -10,7 +10,7 @@ HOST="${BAZZITE:-bazzite.local}"
 SCEN="${1:-game_wins}"
 ROOMS="${2:-2}"
 TIMEOUT="${E2E_TIMEOUT:-600}"
-GUID="schmidtwmark-RankedRace"
+GUID="schmidtwmark-Hades_2_Competitive_Speedrunning"
 PORT=$((20000 + RANDOM % 20000))
 RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-$SCEN$([ "${COMPETITIVE:-0}" = 1 ] && echo -competitive)"
 mkdir -p "$RUN"

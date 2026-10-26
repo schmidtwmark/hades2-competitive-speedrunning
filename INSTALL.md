@@ -1,8 +1,9 @@
-# Installing Ranked Race
+# Installing Hades 2 Competitive Speedrunning (beta)
 
-Ranked Race is a race mod for two to five players of **Hades II on Steam**
-(Windows, Linux, Steam Deck). Every racer needs it installed. It is not on Thunderstore or in any mod
-manager yet; install it from this repository with the script for your system.
+Hades 2 Competitive Speedrunning (H2CS) is a race mod for two to five players of **Hades II on Steam**
+(Windows, Linux, Steam Deck). It is a **beta**: expect rough edges, and please report bugs on GitHub.
+Every racer needs it installed. This page installs it from this repository with the script for your system;
+with a mod manager (r2modman, Gale), install it from Thunderstore instead.
 macOS is not supported (the mod loader is Windows-only and Hades II on Mac does
 not run through Proton).
 
@@ -13,13 +14,13 @@ The installer puts three things in place and nothing else:
 - **ModUtil** and its helper libraries, the exact versions the mod is tested with,
   downloaded from Thunderstore and checked against the SHA-256 sums in
   [`install/packages.txt`](install/packages.txt);
-- **Ranked Race** itself, from this repository.
+- **Hades 2 Competitive Speedrunning** itself, from this repository.
 
 Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched.
 
 ## Install
 
-1. **Get the files.** Either `git clone https://github.com/schmidtwmark/hades2-ranked-race`
+1. **Get the files.** Either `git clone https://github.com/schmidtwmark/hades2-competitive-speedrunning`
    or download the ZIP (green **Code** button → **Download ZIP**) and unzip it.
 
 2. **Run the installer** from that folder:
@@ -109,23 +110,23 @@ Mods go in `Hades II/Ship/ReturnOfModding/plugins`. Your saves are never touched
   result and their progress live. When everyone is done, a results screen
   compares the runs.
 - The public race server is the default; nothing to configure.
-- **Every racer needs matching versions:** the same Ranked Race release line
+- **Every racer needs matching versions:** the same H2CS release line
   (e.g. any 0.5.x) and the same Hades II build. If they differ, the board says
   "Can't race <name>" and who has to update what.
 
 ## Update
 
-The Race Board says when a newer Ranked Race is out (**How to Update** on its home
+The Race Board says when a newer version is out (**How to Update** on its home
 page). Quit Hades II, then run one command; it downloads the latest release and
 runs the installer again. Your racer name and settings are kept.
 
 - **Linux / Steam Deck** (on the Deck: Desktop Mode → Konsole):
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.sh | bash
   ```
 - **Windows** (PowerShell):
   ```powershell
-  irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex
+  irm https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.ps1 | iex
   ```
 
 Or by hand: get the new files (`git pull`, or a fresh ZIP) and run the installer
@@ -141,7 +142,7 @@ back the `d3d12.dll` that was there before).
 
 - **Other mods / r2modman:** this install lives in the game folder and is separate
   from r2modman or Gale profiles. Launching through a mod manager uses that
-  manager's profile instead (where Ranked Race isn't installed).
+  manager's profile instead (where this install isn't).
 - **Normal play** still works with the mod installed; one visible change is that
   the pause menu's "Undo Night" reads "Forfeit Race" (outside a race it still
   undoes the night as usual).
@@ -162,7 +163,7 @@ back the `d3d12.dll` that was there before).
 
 Follow these steps exactly; ask the human before anything not listed here.
 
-1. Clone `https://github.com/schmidtwmark/hades2-ranked-race` (or download the ZIP)
+1. Clone `https://github.com/schmidtwmark/hades2-competitive-speedrunning` (or download the ZIP)
    into a working folder. Ask the human what name they want to race under.
 2. Run the installer for their OS from the repository root:
    - Windows: `powershell -ExecutionPolicy Bypass -File install\install.ps1 -Name "<name>"`
@@ -177,10 +178,10 @@ Follow these steps exactly; ask the human before anything not listed here.
    confirm.
 4. Ask the human to start Hades II once and reach the title screen, then verify
    `<Hades II>/Ship/ReturnOfModding/LogOutput.log` contains all of:
-   - `schmidtwmark-RankedRace: === Ranked Race`
+   - `schmidtwmark-Hades_2_Competitive_Speedrunning: === Hades 2 Competitive Speedrunning`
    - `competitive: native save guard on 2/2 functions`
    - `competitive: main menu sjson patched`
-   and that the title screen shows **Play Competitive Speedrun**.
+   and that the title screen shows **Play Competitive Speedrun (Beta)**.
 5. Do not modify save files (Windows `%USERPROFILE%\Saved Games\Hades II`, or
    `.../compatdata/1145350/pfx/drive_c/users/steamuser/Saved Games/Hades II` under
    Proton), install other mods, or change the race server settings.
@@ -190,9 +191,9 @@ Follow these steps exactly; ask the human before anything not listed here.
 | No `ReturnOfModding/LogOutput.log` at all | Hell2Modding didn't load: on Linux/Deck the `WINEDLLOVERRIDES="d3d12=n,b"` part is missing; on Windows `d3d12.dll` isn't next to `Hades2.exe`. |
 | Log says `ReturnOfModding disabled because first enabled launch was explicit` | `--rom_enabled true` is missing from the launch options (this happens after a mod manager was used once). |
 | Log has `signature not found` lines | The game updated; those features are off until the mod is updated. Report it. |
-| Title screen has no **Play Competitive Speedrun** | Same as above, or the launch went through a mod manager profile instead of Steam. |
+| Title screen has no **Play Competitive Speedrun (Beta)** | Same as above, or the launch went through a mod manager profile instead of Steam. |
 | Board says the race server is unreachable | Network/firewall; the server is `hopper.proxy.rlwy.net:16303` (TCP). |
-| Board: "This Ranked Race is out of date" | The server needs a newer mod: `git pull` (or a fresh ZIP) and run the installer again. |
+| Board: "This version of H2CS is out of date" | The server needs a newer mod: run the update command (see Update above). |
 | Board: "Can't race X" / "Your Hades II is out of date" | Update Hades II in Steam (Library → Hades II → Update), restart the game. |
-| Board: "Can't race X" / "X's Ranked Race (or Hades II) is out of date" | Your rival has to update; search again afterwards. |
-| Two racers saw different rooms, encounters or offers | Each race writes a choice log to `ReturnOfModding/plugins_data/schmidtwmark-RankedRace/races/`. Send both racers' logs from that race (`scripts/compare-race-logs.py A.jsonl B.jsonl` shows where they differ). |
+| Board: "Can't race X" / "X's Hades 2 Competitive Speedrunning (or Hades II) is out of date" | Your rival has to update; search again afterwards. |
+| Two racers saw different rooms, encounters or offers | Each race writes a choice log to `ReturnOfModding/plugins_data/schmidtwmark-Hades_2_Competitive_Speedrunning/races/`. Send both racers' logs from that race (`scripts/compare-race-logs.py A.jsonl B.jsonl` shows where they differ). |

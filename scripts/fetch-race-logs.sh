@@ -8,7 +8,7 @@ A="${1:-deck@steamdeck.local}"
 B="${2:-bazzite.local}"
 OUT="$ROOT/local/runs/races/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
-REMOTE='.local/share/Steam/steamapps/common/Hades II/Ship/ReturnOfModding/plugins_data/schmidtwmark-RankedRace/races'
+REMOTE='.local/share/Steam/steamapps/common/Hades II/Ship/ReturnOfModding/plugins_data/schmidtwmark-Hades_2_Competitive_Speedrunning/races'
 fetch() { # host -> local path of its newest log
   local host=$1 name
   name=$(ssh "$host" "ls -t \"\$HOME/$REMOTE\"/*.jsonl 2>/dev/null | head -1")

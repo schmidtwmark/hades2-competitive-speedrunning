@@ -86,7 +86,7 @@ YourName-HadesRanked/
 
 ## Feature Breakdown & Implementation Details
 
-### 1. Entry Point — "Ranked Race" Access
+### 1. Entry Point — "Competitive Speedrun" Access
 
 **Goal:** Player can access the ranked race mode from within the game.
 
@@ -95,7 +95,7 @@ Rather than modifying the title screen (which requires deep hooks into Supergian
 
 - Register a hotkey (e.g., `F8` or a configurable key) in `main.lua`.
 - When pressed, toggle the lobby ImGui window.
-- The window acts as the full "Ranked Race" interface: connect to server, create/join lobby, vote, see results.
+- The window acts as the full race interface: connect to server, create/join lobby, vote, see results.
 
 ```lua
 -- main.lua (simplified)

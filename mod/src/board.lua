@@ -62,7 +62,7 @@ Board.QUICK_LINES = { 'GG', 'Good luck!', 'Nice!', 'Oops', 'Well played', 'Remat
 
 -- First-open welcome (and the home page's About): spoilers first, then what the
 -- mod is, then how it was made.
-Board.REPO = 'github.com/schmidtwmark/hades2-ranked-race'
+Board.REPO = 'github.com/schmidtwmark/hades2-competitive-speedrunning'
 -- Lines stay under ~60 characters: longer ones wrap onto the next line.
 Board.WELCOME_LINES = {
 	{ 'Warning: Spoilers Ahead', 'gold' },
@@ -74,6 +74,7 @@ Board.WELCOME_LINES = {
 	{ 'Or host a lobby with 5 players', 'grey'},
 	{ 'All players see the same encounters and reward choices', 'grey'},
 	{ '', 'grey' },
+	{ 'This is a beta: please report bugs on GitHub.', 'grey' },
 	{ 'AI disclosure: This mod was developed with Claude', 'grey' },
 	{ 'It is fully open source:', 'grey' },
 	{ Board.REPO, 'grey' },
@@ -82,9 +83,9 @@ Board.WELCOME_LINES = {
 -- Where each route starts in the Crossroads (using it marks you ready).
 -- How to update: the repository and the one-line updaters (install/update.*).
 Board.UPDATE = {
-	url = 'github.com/schmidtwmark/hades2-ranked-race',
-	linux = 'curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.sh | bash',
-	windows = 'irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex',
+	url = 'github.com/schmidtwmark/hades2-competitive-speedrunning',
+	linux = 'curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.sh | bash',
+	windows = 'irm https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.ps1 | iex',
 }
 
 -- How this copy was installed, from its own folder: a mod manager's profile
@@ -202,12 +203,12 @@ end
 -- Lines for "can't race": who has to update what, and how.
 function Board.mismatch_lines(m)
 	local rival = Board.safe(m.rival or 'your rival')
-	local thing = m.what == 'game' and 'Hades II' or 'Ranked Race'
+	local thing = m.what == 'game' and 'Hades II' or 'Hades 2 Competitive Speedrunning'
 	local how = m.what == 'game' and 'Update it in Steam: Library -> Hades II -> Update.'
 		or (Board.manager and 'Update it in your mod manager: see How to Update.'
 			or 'Quit the game and run one command: see How to Update.')
 	if m.code == 'update_required' then
-		return { { text = 'This Ranked Race is out of date', color = RED },
+		return { { text = 'This version of H2CS is out of date', color = RED },
 			{ text = 'It can no longer race on this server.' }, { text = how, color = GREY } }
 	end
 	local head = { text = "Can't race " .. rival, color = RED }
@@ -244,7 +245,7 @@ function Board.view(c, ui, now, names)
 		d.id, d.title = 'prompt:race', 'Race Menu'
 		line('Message the race, or give up your run.', GREY)
 		local latest = c:update_available()
-		if latest then line('Ranked Race ' .. latest .. ' is out: update after the race (Race Board, How to Update).', GOLD) end
+		if latest then line('H2CS ' .. latest .. ' is out: update after the race.', GOLD) end
 		button('chat', 'Chat', 'chat')
 		button('forfeit', 'Forfeit Race', 'race_forfeit')
 		button('keep', 'Back to the Race', 'prompt_cancel')
@@ -296,7 +297,7 @@ function Board.view(c, ui, now, names)
 	end
 
 	if st.conn ~= 'connected' or not st.id then
-		d.id, d.title = 'offline', 'Competitive Speedrun'
+		d.id, d.title = 'offline', 'Hades 2 Competitive Speedrunning'
 		line(st.conn == 'connecting' and 'Reaching the race server...' or 'The race server is unreachable. Retrying...')
 		return d
 	end
@@ -338,18 +339,18 @@ function Board.view(c, ui, now, names)
 		local mm = st.mismatch
 		local blocked = mm and mm.what ~= 'game' and (mm.code == 'update_required' or mm.who == 'you' or mm.who == 'both')
 		if ui.page == 'update' and Board.manager then
-			d.id, d.title = 'update:manager', 'Update Ranked Race'
-			line(latest and ('Version ' .. latest .. ' is out (you have ' .. tostring(c.version) .. ').') or 'Get the latest Ranked Race.', GOLD)
-			line('Update it in your mod manager (r2modman, Gale or Thunderstore Mod Manager):')
-			line('it marks Ranked Race as having an update. Update it there,', GREY)
-			line('then quit Hades II and start it modded again.', GREY)
+			d.id, d.title = 'update:manager', 'Update H2CS'
+			line(latest and ('Version ' .. latest .. ' is out (you have ' .. tostring(c.version) .. ').') or 'Get the latest version.', GOLD)
+			line('Update it in your mod manager (r2modman or Gale):')
+			line('it shows Hades 2 Competitive Speedrunning as updatable.', GREY)
+			line('Update it there, then start Hades II modded again.', GREY)
 			button('back', 'Back', 'home')
 			d.cancel = { action = 'home', label = '{CN} Back' }
 			return d
 		end
 		if ui.page == 'update' then
-			d.id, d.title = 'update', 'Update Ranked Race'
-			line(latest and ('Version ' .. latest .. ' is out (you have ' .. tostring(c.version) .. ').') or 'Get the latest Ranked Race.', GOLD)
+			d.id, d.title = 'update', 'Update H2CS'
+			line(latest and ('Version ' .. latest .. ' is out (you have ' .. tostring(c.version) .. ').') or 'Get the latest version.', GOLD)
 			line('Quit Hades II, then run one command:')
 			line('Steam Deck / Linux (on the Deck: Desktop Mode, then Konsole):', GREY)
 			d.lines[#d.lines + 1] = { text = Board.UPDATE.linux, size = 18, width = 1100 }
@@ -361,17 +362,17 @@ function Board.view(c, ui, now, names)
 			d.cancel = { action = 'home', label = '{CN} Back' }
 			return d
 		end
-		d.id, d.title = 'home', 'Competitive Speedrun'
+		d.id, d.title = 'home', 'Hades 2 Competitive Speedrunning'
 		line('Racing as ' .. Board.safe(c.name))
 		if latest then
-			line('Update available: Ranked Race ' .. latest .. ' (you have ' .. tostring(c.version) .. ').', GOLD)
+			line('Update available: H2CS ' .. latest .. ' (you have ' .. tostring(c.version) .. ').', GOLD)
 			d.id = 'home:update'
 		end
 		if st.mismatch then
 			for _, l in ipairs(Board.mismatch_lines(st.mismatch)) do line(l.text, l.color) end
 			d.id = 'home:mismatch'
 		else
-			line('Same seed, same rooms, same foes. First to clear wins.', GREY)
+			line('Beta. Same seed, same rooms, same foes. First to clear wins.', GREY)
 			local online = Board.presence_text(st.presence)
 			if online then line(online, GREY) end
 			local err = st.last_error
@@ -637,7 +638,7 @@ function Board.view(c, ui, now, names)
 		button('chat', 'Chat', 'chat')
 		button('leave', 'Leave Race', 'leave')
 	else
-		d.id, d.title = 'phase:' .. tostring(phase), 'Competitive Speedrun'
+		d.id, d.title = 'phase:' .. tostring(phase), 'Hades 2 Competitive Speedrunning'
 	end
 	return d
 end

@@ -9,7 +9,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${BAZZITE:-bazzite.local}"
-GUID="schmidtwmark-RankedRace"
+GUID="schmidtwmark-Hades_2_Competitive_Speedrunning"
 RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-overlay"
 mkdir -p "$RUN"
 RHOME="$(ssh "$HOST" 'echo $HOME')"

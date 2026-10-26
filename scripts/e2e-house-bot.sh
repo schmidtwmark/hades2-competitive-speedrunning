@@ -14,7 +14,7 @@ HOST="${BAZZITE:-bazzite.local}"
 MODE=house_bot
 ROOMS="${1:-2}"
 TIMEOUT="${E2E_TIMEOUT:-600}"
-GUID="schmidtwmark-RankedRace"
+GUID="schmidtwmark-Hades_2_Competitive_Speedrunning"
 PORT=$((20000 + RANDOM % 20000))
 RUN="$ROOT/local/runs/$(date +%Y%m%d-%H%M%S)-house-bot"
 mkdir -p "$RUN"

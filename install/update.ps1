@@ -1,7 +1,7 @@
 <#
-Update Ranked Race (Windows) in one command, with the game closed. In PowerShell:
+Update Hades 2 Competitive Speedrunning (Windows) in one command, with the game closed. In PowerShell:
 
-  irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex
+  irm https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.ps1 | iex
 
 Downloads this repository's latest release (the main branch) to a temporary
 folder and runs its installer, which keeps your racer name and settings.
@@ -9,7 +9,7 @@ folder and runs its installer, which keeps your racer name and settings.
 & {
     $ErrorActionPreference = "Stop"
     $ProgressPreference = "SilentlyContinue"
-    $repo = "schmidtwmark/hades2-ranked-race"
+    $repo = "schmidtwmark/hades2-competitive-speedrunning"
     if (Get-Process -Name Hades2 -ErrorAction SilentlyContinue) {
         Write-Host "Hades II is running: quit the game, then run this again." -ForegroundColor Red
         return
@@ -17,7 +17,7 @@ folder and runs its installer, which keeps your racer name and settings.
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ranked-race-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
-        Write-Host "Downloading the latest Ranked Race..."
+        Write-Host "Downloading the latest Hades 2 Competitive Speedrunning..."
         $zip = Join-Path $tmp "main.zip"
         Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/$repo/zip/refs/heads/main" -OutFile $zip
         Expand-Archive -Path $zip -DestinationPath $tmp

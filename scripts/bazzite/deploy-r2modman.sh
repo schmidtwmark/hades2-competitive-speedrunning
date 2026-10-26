@@ -21,7 +21,7 @@ for dir in "$PKG"/*; do
   case "$guid" in Hell2Modding-Hell2Modding) continue ;; esac
   rsync -a "$dir/" "$HOST:$STAGE/plugins/$guid/"
 done
-rsync -a --exclude '.DS_Store' "$ROOT/mod/src/" "$HOST:$STAGE/plugins/schmidtwmark-RankedRace/"
+rsync -a --exclude '.DS_Store' "$ROOT/mod/src/" "$HOST:$STAGE/plugins/schmidtwmark-Hades_2_Competitive_Speedrunning/"
 
 ssh "$HOST" "VERSIONS='$VERSIONS' bash -s" <<'REMOTE'
 set -euo pipefail
