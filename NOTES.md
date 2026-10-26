@@ -203,6 +203,25 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
+- **Keepsake grants** (0.6.4): Jeweled Pom (`HadesAndPersephoneKeepsake`,
+  `GiveRandomHadesBoonAndBoostBoons`), the temporary hammer (`AddRandomHammer`) and the Chaos
+  blessing keepsake (`AddRandomChaosBlessing`) each draw one `GetRandomArrayValue` from an
+  eligible list when the keepsake is equipped (inside `StartNewRun`). Rank picks didn't cover
+  `GetRandomArrayValue`, and Arcana change the list: Last Stand sets
+  `DeathDefianceDamageBoonEligible`, one more Hades boon (a real race: the two racers got
+  different Hades boons, one had Last Stand). Now ranked (`keepsake_grant`, rank_scope with
+  `GetRandomArrayValue`); the grant is a `granted` race-log line (depth 0, written once the log
+  starts), compared as "keepsake grant" at run start.
+- **Board across a map load** (0.6.4): `LoadMap` calls `KillNonPersistentThreads`, ending the
+  board's input loop; a chat page opened in the Crossroads kept the board open through the race's
+  map load (prompts outrank the countdown page that closes it). The dead screen kept
+  `ExclusiveInteractGroup` and its ActiveScreens entry, so the in-run forfeit prompt drew into it
+  and took no presses (user report: menu controls stopped after a rematch). The board remembers
+  its `MapState`; a changed one releases the screen (`Board:release`, no `CloseScreen`: the
+  frame callback can't wait) and the Crossroads chat page closes when the racer leaves.
+- **Split targets** (0.6.4): `race_start.best` is the racer's server-kept best on the route
+  (time + splits); the client takes the faster of it and `pb.json`. Under the clock: the region
+  being run and its best split ("Erebus  best 6:32.10", gold), a split's result for 10 s.
 - **Store identity** (0.6.3, `identity.lua`): the name and player key come from the store
   account. Verified 2026-10-24 on the owner's bazzite install (launched by Steam): the SteamID64
   and persona name read at the Crossroads hello, the live server logged the steam key. The test

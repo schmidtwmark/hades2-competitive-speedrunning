@@ -206,7 +206,8 @@ export type ServerMessage =
       votes: { you: string | null; opponent: string | null };
       counts: Record<string, number>;
     }
-  | ({ type: "race_start"; countdown: number; countdown_ms: number } & RaceSetup)
+  /** best: this racer's personal best on the route (time + region splits), for the split targets. */
+  | ({ type: "race_start"; countdown: number; countdown_ms: number; best?: { time: number; splits: Split[] } } & RaceSetup)
   | ({ type: "opponent_progress" } & Progress & Who)
   | ({ type: "opponent_ghost" } & Ghost & { id: string })
   | ({ type: "opponent_finished"; victory: boolean; time: number | null; outcome: Outcome } & Who)

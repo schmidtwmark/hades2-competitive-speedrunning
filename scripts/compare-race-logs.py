@@ -73,6 +73,12 @@ def boons(evs):
     return out
 
 
+def grants(evs):
+    # What keepsakes granted (Jeweled Pom's Hades boon, the temporary hammer, ...).
+    out = [f"{e.get('source')}:{','.join(e.get('traits') or []) or '-'}" for e in evs.get("granted", [])]
+    return sorted(out) or None
+
+
 def stores(evs):
     return [sorted(e.get("items", [])) for e in evs.get("store", [])]
 
@@ -111,6 +117,15 @@ def compare(path_a, path_b):
     unfair = []
     split_at = None  # first depth where their choices differed
     last = min(max(a or [0]), max(b or [0]))
+    # Granted before the first room (keepsakes are equipped when the run starts).
+    ga, gb = grants(a.get(0, {})), grants(b.get(0, {}))
+    if ga or gb:
+        if ga == gb:
+            print(f"run start\n  keepsake grant: same  {ga}")
+        else:
+            print(f"run start\n  keepsake grant: DIFF\n     A {ga}\n     B {gb}")
+            diffs.append((0, "keepsake grant"))
+            unfair.append((0, "keepsake grant"))
     for depth in range(1, last + 1):
         ea, eb = a.get(depth, {}), b.get(depth, {})
         if not ea and not eb:
@@ -134,6 +149,7 @@ def compare(path_a, path_b):
                     unfair.append((depth, label))
 
         check("room", room_line(ea), room_line(eb))
+        check("keepsake grant", grants(ea), grants(eb), partial_ok=True)
         check("door rooms' encounters", door_encounters(ea) or None, door_encounters(eb) or None, partial_ok=True)
         check("doors", doors(ea), doors(eb), partial_ok=True)
         ba, bb = boons(ea), boons(eb)
@@ -161,7 +177,7 @@ def compare(path_a, path_b):
     shared = f"depths 1-{split_at}" if split_at else f"all {last} depths"
     if unfair:
         where = ", ".join(f"{label} at depth {d}" for d, label in unfair)
-        if not same_loadout and all(label.startswith("boon offer") for _, label in unfair):
+        if not same_loadout and all(label.startswith("boon offer") or label == "keepsake grant" for _, label in unfair):
             print(f"FAIRNESS: LOADOUTS DIFFER ({where}: boon offers can depend on aspect and Arcana)")
             return True
         print(f"FAIRNESS: CHECK ({where}, while both had made the same choices)")

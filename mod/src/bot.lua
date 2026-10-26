@@ -21,6 +21,7 @@
 --   ready_via_door  ready up by using the voted route's exit in the Crossroads
 --   chat          a line to send when the run starts (checks both racers' lines arrive)
 --   chat_on_board n: during the prep time, send quick line n from the board's chat page
+--   chat_hold     ready on the board, then open its chat page and leave it up into the race
 --   welcome_dwell show the first-open welcome page this many seconds, then Continue
 --   race_menu_peek  mid-run, open the Race Menu and its chat page, then go back (screenshots)
 --   shadow_mirror { dx, dy }: also draw our own hero's shadow, offset (size checks)
@@ -512,7 +513,11 @@ function Bot:step_lobby(now, c, st)
 	end
 	if phase == 'ready_check' and not self.readied and not self:wait_dwell('ready', now) then
 		self.readied = true
-		if self.cfg.ready_via_door then
+		if self.cfg.chat_hold and self.cfg.use_board then
+			-- Ready, then open the chat page and leave it up while the race starts
+			-- (it once rode through the map load and left a dead board behind).
+			self:queue_press('ready', 'chat')
+		elseif self.cfg.ready_via_door then
 			self:use_route_door(c)
 		else
 			self:lobby_action({ 'ready' }, function() c:ready() end)

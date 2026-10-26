@@ -453,20 +453,32 @@ function Hud:update_prep()
 	for i, row in ipairs(view.rows) do show(i, panel.rows[i], row.text, row.color) end
 end
 
--- The latest region split under the clock: "Erebus  5:12.30  -0:05.31",
--- green ahead of the PB's split, red behind, white without a PB.
+-- Under the clock: the region being run and its PB split ("Erebus  best
+-- 6:32.10", gold), and for SPLIT_HOLD seconds after each split its result
+-- ("Erebus  5:12.30  -0:05.31", green ahead of the PB's split, red behind,
+-- white without a PB).
+local SPLIT_HOLD = 10
+function Hud.split_line(sp, now, fmt_delta)
+	if not sp then return nil end
+	local last, target = sp.last, sp:target()
+	if last and not (target and type(now) == 'number' and now - last.time >= SPLIT_HOLD) then
+		local text, color = last.name .. '  ' .. fmt_time(last.time), WHITE
+		if last.delta and fmt_delta then
+			text = text .. '  ' .. fmt_delta(last.delta)
+			color = last.delta < 0 and GREEN or RED
+		end
+		return text, color
+	end
+	if target then return target.name .. '  best ' .. fmt_time(target.time), GOLD end
+	return nil
+end
+
 function Hud:update_split()
 	local G, ms = self.G, self.G.MapState
 	local race = self.game.race
-	local last = race and race.splits and race.splits.last
-	if not last then return end
-	local fmt_delta = self.game.Splits and self.game.Splits.fmt_delta
-	local text = last.name .. '  ' .. fmt_time(last.time)
-	local color = WHITE
-	if last.delta and fmt_delta then
-		text = text .. '  ' .. fmt_delta(last.delta)
-		color = last.delta < 0 and GREEN or RED
-	end
+	local now = self.client and self.client:race_time()
+	local text, color = Hud.split_line(race and race.splits, now, self.game.Splits and self.game.Splits.fmt_delta)
+	if not text then return end
 	if not ms.RankedRaceSplit then
 		local id = G.CreateScreenObstacle({ Name = 'BlankObstacle', Group = CLOCK_GROUP, X = (G.ScreenWidth or 1920) - MARGIN,
 			Y = SPLIT_Y })

@@ -50,6 +50,37 @@ function Splits:room(room_name, t)
 	return split
 end
 
+-- The split being run toward: { name, time = the PB's time for it }, or nil
+-- before the first room, after the clear, or without a PB split for it.
+function Splits:target()
+	if self.cleared or not self.current then return nil end
+	local i = #self.times + 1
+	local t = self.pb and self.pb.splits and self.pb.splits[i]
+	if type(t) ~= 'number' then return nil end
+	return { index = i, name = self:name_of(i, self.current), time = t }
+end
+
+-- The race server's best for this route ({ time, splits = { { name, time }, ... } })
+-- in our PB form; nil if it has no splits.
+function Splits.from_server(best)
+	if type(best) ~= 'table' or type(best.splits) ~= 'table' or #best.splits == 0 then return nil end
+	local splits, names = {}, {}
+	for i, sp in ipairs(best.splits) do
+		if type(sp) ~= 'table' or type(sp.time) ~= 'number' then return nil end
+		splits[i], names[i] = sp.time, sp.name
+	end
+	return { total = splits[#splits], splits = splits, names = names }
+end
+
+-- The faster of two PB records (either may be nil).
+function Splits.better(a, b)
+	local ta = type(a) == 'table' and type(a.total) == 'number' and a.total or nil
+	local tb = type(b) == 'table' and type(b.total) == 'number' and b.total or nil
+	if not ta then return tb and b or nil end
+	if not tb then return a end
+	return tb < ta and b or a
+end
+
 -- The run is cleared at race time t: the last split, and whether it beat the PB.
 function Splits:clear(t)
 	local split = self:record(t)

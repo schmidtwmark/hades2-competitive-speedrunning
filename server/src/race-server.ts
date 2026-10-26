@@ -935,6 +935,7 @@ export class RaceServer {
     );
     this.broadcastState(lobby);
     for (const p of lobby.players) {
+      const best = this.opts.pbs?.detail(p.key, race.route || "default");
       p.send({
         type: "race_start",
         race_id: race.race_id,
@@ -944,6 +945,7 @@ export class RaceServer {
         route: race.route,
         countdown: Math.round(this.opts.countdownMs / 1000),
         countdown_ms: this.opts.countdownMs,
+        ...(best ? { best } : {}),
       });
     }
     lobby.timer = this.opts.scheduler.setTimeout(() => {

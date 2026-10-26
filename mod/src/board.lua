@@ -1122,6 +1122,7 @@ function Board:run()
 		},
 	}
 	self.screen, self.dynamic = screen, {}
+	self.screen_map = G.MapState -- a map load kills this screen's input loop (KillNonPersistentThreads)
 	self.stats.opens = self.stats.opens + 1
 	G.OnScreenOpened(screen)
 	G.HideCombatUI(screen.Name)
@@ -1191,6 +1192,17 @@ function Board:finish_close()
 end
 
 -- Ask the input loop to end (it closes the screen on its own coroutine).
+-- Undo what an open screen holds without closing its (already destroyed)
+-- components: CloseScreen waits, and the per-frame tick isn't a game thread.
+function Board:release()
+	local G, screen = self.G, self.screen
+	screen.KeepOpen, screen.closed = false, true
+	self.waiting_on = nil
+	pcall(G.SetConfigOption, { Name = 'ExclusiveInteractGroup', Value = nil })
+	pcall(G.OnScreenCloseFinished, screen)
+	pcall(G.ShowCombatUI, screen.Name)
+end
+
 function Board:close()
 	local screen = self.screen
 	if not screen or not screen.KeepOpen then return end
@@ -1279,6 +1291,18 @@ function Board:update_hint(show)
 end
 
 function Board:tick(in_hub)
+	-- The map changed under an open board (a race started with it up): LoadMap
+	-- killed its input loop, but the screen still holds the controller (its
+	-- exclusive interact group) and would swallow every press. Let it go; the
+	-- next page opens a fresh one.
+	local screen = self.screen
+	if screen and not screen.closed and self.screen_map ~= self.G.MapState then
+		-- (Also one asked to close whose loop died before it could finish.)
+		self.log('board: its map was unloaded while open; released')
+		self:release()
+	end
+	-- The Crossroads chat page doesn't follow the racer into the run.
+	if not in_hub and self.ui.prompt == 'chat' and self.ui.chat_from == nil then self.ui.prompt = nil end
 	if in_hub then self:patch_stone() end
 	self:update_hint(in_hub and not self:is_open() and not self:other_screen_open() and self:input_allowed())
 	local p = self.ui.prompt

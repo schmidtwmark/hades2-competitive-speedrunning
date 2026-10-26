@@ -1061,6 +1061,9 @@ describe("store identity and personal bests", () => {
     raceOnce(store, 500_000, [{ name: "Erebus", time: 8 }]);
     const reloaded = new PbStore("/data/pbs.json", () => {}, mem.fs);
     assert.deepEqual(reloaded.best("steam:76561197960287930"), { default: 500 });
+    const again = raceOnce(new PbStore("/data/pbs.json", () => {}, mem.fs), 900_000);
+    assert.deepEqual(again.a.last("race_start").best, { time: 500, splits: [{ name: "Erebus", time: 8 }] }, "your best comes with the start");
+    assert.equal(again.b.last("race_start").best, undefined, "nothing for a racer without one");
     const saved = JSON.parse(mem.files.get("/data/pbs.json")!);
     assert.deepEqual(saved.players["steam:76561197960287930"].routes.default.splits, [{ name: "Erebus", time: 8 }]);
     assert.equal(saved.players["steam:76561197960287930"].name, "Alice");

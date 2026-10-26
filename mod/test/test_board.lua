@@ -709,3 +709,33 @@ T.case('board: the route vote shows every racer\'s personal best on each route, 
 	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'voting_route', you = 'p1', players = two })
 	T.eq(view(c, b).lines[3].text, 'Personal bests show here once racers clear a route.')
 end)
+
+T.case('board: a race starting with the chat page up no longer leaves a dead board holding the controller', function()
+	local c, f = make()
+	local G = engine()
+	local logs = {}
+	local b = Board.new({ G = G, client = c, log = function(l) logs[#logs + 1] = l end, now = function() return f.t end })
+	b:install()
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'ready_check', you = 'p1', players = players })
+	b:open()
+	b:update(true)
+	b.desc = Board.view(c, b.ui, f.t)
+	b:press('chat') -- the Crossroads chat page, then the countdown and the race's map load
+	b:update(true)
+	T.eq(b.ui.prompt, 'chat')
+	G.MapState = {} -- LoadMap: a new MapState, and KillNonPersistentThreads ended the input loop
+	f.push({ type = 'lobby_state', code = 'AB2C', phase = 'racing', you = 'p1', players = players })
+	b:update(false)
+	T.eq(b:is_open(), false, 'released')
+	T.eq(G.ActiveScreens[Board.SCREEN], nil, 'no longer an active screen (it blocked pausing)')
+	T.eq(b.ui.prompt, nil, 'the Crossroads chat page stays behind')
+	local released = false
+	for _, l in ipairs(logs) do if l:find('unloaded while open') then released = true end end
+	T.truthy(released)
+	-- The pause menu's Forfeit now opens a fresh, working screen.
+	b:prompt('forfeit')
+	b:update(false)
+	T.truthy(b:is_open())
+	T.eq(b.desc.id, 'prompt:forfeit')
+	T.eq(G.waiting ~= nil, true, 'an input loop is waiting for presses')
+end)

@@ -33,7 +33,8 @@ local HOOKS = { 'StartNewRun', 'InitializeRewardStores', 'ChooseStartingRoom', '
 	'UnlockAchievement', 'CheckProgressAchievements', 'CheckAchievement', 'ChooseLoot', 'FillInShopOptions',
 	'SetTraitsOnLoot', 'HandleBreakableSwap', 'CheckMoneyDrop', 'ProcessObjectValueOptions',
 	'CheckChallengeSwitchItemValidity', 'CheckPlayerOnFirePowers', 'ChooseSpell', 'CreateSpellButtons',
-	'IsSecretDoorEligible', 'ChooseNextRewardStore', 'UseWeaponKit', 'UseKeepsakeRack', 'AddInputBlock', 'RemoveInputBlock' }
+	'IsSecretDoorEligible', 'ChooseNextRewardStore', 'UseWeaponKit', 'UseKeepsakeRack', 'AddInputBlock', 'RemoveInputBlock',
+	'GiveRandomHadesBoonAndBoostBoons', 'AddRandomHammer', 'AddRandomChaosBlessing' }
 
 -- Shadow animations for hero actions whose fire graphic isn't the visible move.
 local ACTION_ANIMS = { WeaponBlink = 'MelinoeDashStart', WeaponSprint = 'MelinoeSprint' }
@@ -325,14 +326,14 @@ end
 -- *eligible* options. If two racers' lists differ by one entry (a door reward
 -- that bans an encounter, a god only one of them has unlocked), the same draw
 -- lands on different options. Inside a rank-pick scope the game's
--- GetRandomValue / RemoveRandomValue / GetRandomValueFromWeightedList instead
+-- GetRandomValue / GetRandomArrayValue / RemoveRandomValue / GetRandomValueFromWeightedList instead
 -- score every option from (race seed, tags, pick #, option name, copy #) and
 -- take the best eligible one (prunes drop the worst). Equal lists give equal
 -- picks, a missing option only changes the picks it would have won, and the
 -- result doesn't depend on table order (pairs order differs between game
 -- processes).
 
-local RANK_FNS = { 'GetRandomValue', 'RemoveRandomValue', 'GetRandomValueFromWeightedList' }
+local RANK_FNS = { 'GetRandomValue', 'GetRandomArrayValue', 'RemoveRandomValue', 'GetRandomValueFromWeightedList' }
 
 local function option_key(v)
 	if type(v) == 'table' then
@@ -371,6 +372,17 @@ function Game:rank_scope(tags, opts, fn, ...)
 		if t == nil or not next_pick() then return saved.GetRandomValue(t, rng) end
 		local pick, best, best_score, copies = calls, nil, nil, {}
 		for _, v in ipairs(G.CollapseTableOrdered(t)) do
+			local key = keyfn(v)
+			copies[key] = (copies[key] or 0) + 1
+			local sc = score(pick, key, copies[key])
+			if best_score == nil or sc < best_score then best, best_score = v, sc end
+		end
+		return best
+	end
+	G.GetRandomArrayValue = function(t, rng)
+		if t == nil or #t == 0 or not next_pick() then return saved.GetRandomArrayValue(t, rng) end
+		local pick, best, best_score, copies = calls, nil, nil, {}
+		for _, v in ipairs(t) do
 			local key = keyfn(v)
 			copies[key] = (copies[key] or 0) + 1
 			local sc = score(pick, key, copies[key])
@@ -616,6 +628,39 @@ function Game:hook_SetTraitsOnLoot(base, loot, args)
 	return self:rank_scope(tags, nil, base, loot, args)
 end
 
+-- Keepsakes that grant something random when the run starts: Jeweled Pom's
+-- Hades boon, the temporary Daedalus Hammer, the Chaos blessing. Each draws one
+-- GetRandomArrayValue from the eligible list, so a list one entry longer (an
+-- Arcana card like Last Stand makes another Hades boon eligible) gave racers
+-- different grants. One ranked pick instead; the grant goes in the race log.
+function Game:hook_GiveRandomHadesBoonAndBoostBoons(base, ...) return self:keepsake_grant('GiveRandomHadesBoonAndBoostBoons', base, ...) end
+function Game:hook_AddRandomHammer(base, ...) return self:keepsake_grant('AddRandomHammer', base, ...) end
+function Game:hook_AddRandomChaosBlessing(base, ...) return self:keepsake_grant('AddRandomChaosBlessing', base, ...) end
+
+function Game:keepsake_grant(name, base, ...)
+	if not self:race_seed() then return base(...) end
+	local hero = self.G.CurrentRun and self.G.CurrentRun.Hero
+	local had = {}
+	for _, t in ipairs(hero and hero.Traits or {}) do had[t] = true end
+	local results = { pcall(self.rank_scope, self, { 'grant', name, self:race_depth() }, { limit = 1 }, base, ...) }
+	local granted = {}
+	for _, t in ipairs(hero and hero.Traits or {}) do
+		if not had[t] and t.Name then granted[#granted + 1] = t.Name end
+	end
+	table.sort(granted)
+	self.log('game: ' .. name .. ' granted ' .. (#granted > 0 and table.concat(granted, ',') or 'nothing'))
+	if self.launching then
+		-- Inside StartNewRun (the keepsake is equipped there): the race log
+		-- starts once it returns.
+		self.pending_grants = self.pending_grants or {}
+		table.insert(self.pending_grants, { source = name, traits = granted })
+	else
+		self:rlog('granted', { source = name, traits = granted })
+	end
+	if not results[1] then error(results[2], 0) end
+	return unpack_results(results)
+end
+
 -- Every weapon the hero fires (attacks, specials, casts, dashes): tell our
 -- shadow on the rivals' screens to play the same animation.
 function Game:hook_CheckPlayerOnFirePowers(base, args, ...)
@@ -820,7 +865,10 @@ function Game:hook_StartNewRun(base, prevRun, args)
 		pcall(self.apply_seed, self, race.seed)
 		self.race = { race = race, run = self.G.CurrentRun, rooms = {}, finished = false,
 			base_rerolls = self.G.CurrentRun and self.G.CurrentRun.NumRerolls,
-			splits = self.Splits and self.Splits.new(race.route, self.pbs[race.route]) }
+			-- Split targets: the faster of this machine's PB and the race server's
+			-- (kept with the Steam / Epic account, so it follows the racer).
+			splits = self.Splits and self.Splits.new(race.route,
+				self.Splits.better(self.pbs[race.route], self.Splits.from_server(race.best))) }
 		self.dream_biomes = 0
 		self.log('game: race run created for race ' .. tostring(race.race_id))
 		if self.racelog then
@@ -831,6 +879,8 @@ function Game:hook_StartNewRun(base, prevRun, args)
 			-- differ by it, e.g. Daedalus Hammers by aspect, so reports show it.
 			local ok, loadout = pcall(self.race_loadout, self, race.weapon)
 			if ok and loadout then pcall(self.racelog.event, self.racelog, 'loadout', loadout) end
+			for _, g in ipairs(self.pending_grants or {}) do pcall(self.racelog.event, self.racelog, 'granted', g) end
+			self.pending_grants = nil
 		end
 	end
 	return run
@@ -1446,6 +1496,7 @@ function Game:start_race(race)
 		if not ok then self.log('game: saving the loadout failed: ' .. tostring(err)) end
 	end
 	self.launching = race
+	self.pending_grants = nil
 	self.status = nil
 	local start_over = self:fn('StartOver')
 	if not start_over then

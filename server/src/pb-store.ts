@@ -67,6 +67,12 @@ export class PbStore {
     return out;
   }
 
+  /** This player's best on a route (time and splits), or undefined. */
+  detail(key: string | null, route: string): { time: number; splits: Split[] } | undefined {
+    const b = key ? this.players[key]?.routes[route] : undefined;
+    return b ? { time: b.time, splits: b.splits } : undefined;
+  }
+
   /** A clear: kept if it beats the player's best on that route. Returns whether it did. */
   record(key: string, name: string, route: string, time: number, splits: Split[], race: string, now: number): boolean {
     const player = (this.players[key] ??= { name, routes: {} });
