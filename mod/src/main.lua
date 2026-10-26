@@ -7,7 +7,7 @@ local plugin_dir = _PLUGIN.plugins_mod_folder_path
 local data_dir = _PLUGIN.plugins_data_mod_folder_path
 local env = _ENV
 
-local VERSION = '0.6.4'
+local VERSION = '0.6.5'
 
 local function import(name)
 	local chunk = assert(loadfile(plugin_dir .. '/' .. name, 't', env))
@@ -187,6 +187,8 @@ game.shadow, game.hud = shadow, hud
 
 -- Before/after a race: the native Race Board (controller-first) and banners.
 Board.biome = Hud.biome_name
+Board.manager = Board.install_kind(plugin_dir) == 'manager' -- How to Update points at the mod manager
+log('installed by ' .. (Board.manager and 'a mod manager' or 'the installer (or by hand)'))
 local board = Board.new({ G = rom.game, log = log, client = client, game = game, now = socket.gettime,
 	names = function(id) return game:display_name(id) end })
 board:install()

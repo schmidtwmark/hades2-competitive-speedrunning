@@ -203,6 +203,19 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   lobby, two or more, is ready (no host start and no gather countdown any more; 0.5 clients
   are told to update, `MIN_MOD_VERSION` 0.6.0). A rematch goes straight to the votes, so the
   client clears a vote's own and later `vote_results` when it opens.
+- **Thunderstore release** (prepared 0.6.4, not yet published): `scripts/thunderstore-package.sh` builds
+  `build/schmidtwmark-RankedRace-<version>.zip` (flat: mod/src, `thunderstore/` icon + README +
+  CHANGELOG, LICENSE; the layout of SGG_Modding-ModUtil's package) and `build/thunderstore.toml`
+  for tcli, both from `mod/src/manifest.json`, after checking Thunderstore's rules (name, Major.
+  Minor.Patch, description <= 250, website_url, `Team-Name-x.y.z` dependencies = install/packages.txt
+  pins, 256x256 icon, a changelog section for the version, LATEST_MOD_VERSION and main.lua's VERSION
+  equal). Community `hades-ii`, categories mods, gameplay, ai-generated. `.github/workflows/thunderstore.yml`
+  (manual; dry run by default) builds, keeps the zip, and on a real run `tcli publish`es with the
+  `TCLI_AUTH_TOKEN` secret and tags `v<version>`. Owner-only steps: the Thunderstore team must be
+  named `schmidtwmark` (the plugin folder), its service-account token goes in the GitHub secret, and
+  the icon is a placeholder. A mod-manager install (`Board.install_kind`: r2modman / Thunderstore
+  Mod Manager / Gale profile folders) gets "update in your mod manager" on How to Update. Store
+  screenshots are `docs/screenshots/*.jpg`, linked by raw.githubusercontent.com URLs.
 - **Keepsake grants** (0.6.4): Jeweled Pom (`HadesAndPersephoneKeepsake`,
   `GiveRandomHadesBoonAndBoostBoons`), the temporary hammer (`AddRandomHammer`) and the Chaos
   blessing keepsake (`AddRandomChaosBlessing`) each draw one `GetRandomArrayValue` from an

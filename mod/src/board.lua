@@ -87,6 +87,19 @@ Board.UPDATE = {
 	windows = 'irm https://raw.githubusercontent.com/schmidtwmark/hades2-ranked-race/main/install/update.ps1 | iex',
 }
 
+-- How this copy was installed, from its own folder: a mod manager's profile
+-- (r2modman, Thunderstore Mod Manager, Gale) or the game folder (the installer).
+-- main.lua sets Board.manager from it; How to Update then points at the manager.
+function Board.install_kind(path)
+	local p = tostring(path or ''):lower():gsub('\\', '/')
+	if p:find('r2modman', 1, true) or p:find('thunderstore mod manager', 1, true) or p:find('kesomannen.gale', 1, true)
+		or p:find('/profiles/[^/]+/returnofmodding/') then
+		return 'manager'
+	end
+	return 'manual'
+end
+Board.manager = false
+
 Board.ROUTE_START = { underworld = 'the stairs down', surface = 'the path to the Surface', dream = 'the Dream Dive' }
 Board.ROUTE_NAMES = { underworld = 'Underworld', surface = 'Surface', dream = 'Dream Dive' }
 
@@ -191,7 +204,8 @@ function Board.mismatch_lines(m)
 	local rival = Board.safe(m.rival or 'your rival')
 	local thing = m.what == 'game' and 'Hades II' or 'Ranked Race'
 	local how = m.what == 'game' and 'Update it in Steam: Library -> Hades II -> Update.'
-		or 'Quit the game and run one command: see How to Update.'
+		or (Board.manager and 'Update it in your mod manager: see How to Update.'
+			or 'Quit the game and run one command: see How to Update.')
 	if m.code == 'update_required' then
 		return { { text = 'This Ranked Race is out of date', color = RED },
 			{ text = 'It can no longer race on this server.' }, { text = how, color = GREY } }
@@ -323,6 +337,16 @@ function Board.view(c, ui, now, names)
 		local latest = c:update_available()
 		local mm = st.mismatch
 		local blocked = mm and mm.what ~= 'game' and (mm.code == 'update_required' or mm.who == 'you' or mm.who == 'both')
+		if ui.page == 'update' and Board.manager then
+			d.id, d.title = 'update:manager', 'Update Ranked Race'
+			line(latest and ('Version ' .. latest .. ' is out (you have ' .. tostring(c.version) .. ').') or 'Get the latest Ranked Race.', GOLD)
+			line('Update it in your mod manager (r2modman, Gale or Thunderstore Mod Manager):')
+			line('it marks Ranked Race as having an update. Update it there,', GREY)
+			line('then quit Hades II and start it modded again.', GREY)
+			button('back', 'Back', 'home')
+			d.cancel = { action = 'home', label = '{CN} Back' }
+			return d
+		end
 		if ui.page == 'update' then
 			d.id, d.title = 'update', 'Update Ranked Race'
 			line(latest and ('Version ' .. latest .. ' is out (you have ' .. tostring(c.version) .. ').') or 'Get the latest Ranked Race.', GOLD)

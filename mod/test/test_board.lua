@@ -739,3 +739,28 @@ T.case('board: a race starting with the chat page up no longer leaves a dead boa
 	T.eq(b.desc.id, 'prompt:forfeit')
 	T.eq(G.waiting ~= nil, true, 'an input loop is waiting for presses')
 end)
+
+T.case('board: a mod-manager install is told to update there, an installer install gets the commands', function()
+	local kinds = {
+		['C:\\Users\\Mel\\AppData\\Roaming\\r2modmanPlus-local\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manager',
+		['Z:\\home\\deck\\.config\\r2modmanPlus-local\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manager',
+		['C:\\Users\\Mel\\AppData\\Roaming\\com.kesomannen.gale\\hades-ii\\profiles\\Default\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manager',
+		['C:\\Users\\Mel\\AppData\\Roaming\\Thunderstore Mod Manager\\DataFolder\\HadesII\\profiles\\Default\\ReturnOfModding\\plugins\\x'] = 'manager',
+		['S:\\steamapps\\common\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manual',
+		['C:\\Program Files (x86)\\Steam\\steamapps\\common\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manual',
+		['C:\\Users\\Galen\\Games\\Hades II\\Ship\\ReturnOfModding\\plugins\\schmidtwmark-RankedRace'] = 'manual',
+	}
+	for path, want in pairs(kinds) do T.eq(Board.install_kind(path), want, path) end
+	local c, f, b = make()
+	c.version = '0.6.4'
+	f.push({ type = 'welcome', id = 'p1', token = 't', resumed = false, latest_mod = '0.6.5' })
+	Board.manager = true
+	b.ui.page = 'update'
+	local d = view(c, b)
+	T.eq(d.id, 'update:manager')
+	T.truthy(d.lines[2].text:find('mod manager'))
+	for _, l in ipairs(d.lines) do T.truthy(not l.text:find('curl', 1, true), 'no commands for a manager install') end
+	T.truthy(Board.mismatch_lines({ code = 'update_required', who = 'you', what = 'mod' })[3].text:find('mod manager'))
+	Board.manager = false
+	T.eq(view(c, b).id, 'update')
+end)

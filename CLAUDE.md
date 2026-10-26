@@ -17,6 +17,7 @@ A competitive speedrun race mod for Hades 2 — two to five players race the sam
 - Everything: `scripts/suite.sh` (offline gates) or `scripts/suite.sh --game` (adds real-game gates on the test PC). Every gate prints `RESULT: PASS|FAIL`.
 - Mod: no build. `scripts/bazzite/push.sh` copies `mod/src/` and pinned dependencies into the test PC's instance roots.
 - Player install (no mod manager): `install/install.sh` / `install/install.ps1` with the pins in `install/packages.txt`; see INSTALL.md. Keep the pins in step with `local/thunderstore` and the launch option `--rom_enabled true` documented.
+- Thunderstore: `scripts/thunderstore-package.sh` (build + check the upload zip); publish with the manual GitHub Action "Thunderstore release" (dry run by default).
 - After a race on the public server: `scripts/race-report.sh` (list) / `scripts/race-report.sh 1` (what each racer was offered, fairness verdict).
 - Screenshots of a real race: `scripts/screenshot-tour.sh [host:port|local]` (frames in `local/runs/tour/`). Controller-only test: `scripts/e2e-pad.sh`.
 

@@ -14,6 +14,14 @@ that never pauses (the game's own timer, which stops for menus and boon
 choices, is hidden). Everything works with a controller; no keyboard or mod
 keys needed.
 
+![The Race Board: a private race, ready to vote](docs/screenshots/board.jpg)
+
+![Voting on the keepsake, with the weapon the vote picked](docs/screenshots/vote.jpg)
+
+![In a race: the rival's shadow Melinoë, the rival plate and the race clock with the region's best split](docs/screenshots/race.jpg)
+
+![The results: a side-by-side comparison in a 1v1](docs/screenshots/results.jpg)
+
 Rules: the first racer to clear the run wins. Dying, forfeiting (pause menu →
 Forfeit Race) or disconnecting is a DNF: the others still have to clear to
 win, and if nobody clears it is a draw. If a rival clears first you have lost,

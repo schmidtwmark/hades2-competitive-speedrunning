@@ -1,0 +1,55 @@
+# Publish Ranked Race to Thunderstore (thunderstore.io/c/hades-ii). Run it by
+# hand from the Actions tab once the version in mod/src/manifest.json (and
+# LATEST_MOD_VERSION, main.lua's VERSION and thunderstore/CHANGELOG.md) is bumped
+# and pushed. The default is a dry run: build and check the package, keep the
+# zip as an artifact. A real run uploads it with the Thunderstore CLI (needs the
+# repository secret TCLI_AUTH_TOKEN: a service account of the Thunderstore team
+# "schmidtwmark") and tags the commit v<version>.
+name: Thunderstore release
+run-name: ${{ inputs.dry-run && 'Dry run' || 'Publish' }} to Thunderstore
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run: build and check only, don't upload"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # the release tag
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@1d96c772d19495a3b5c517cd2bc0cb401ea0529f # v4
+
+      - name: Build and check the package
+        run: scripts/thunderstore-package.sh
+
+      - name: Keep the package
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4
+        with:
+          name: thunderstore-package
+          path: build/*.zip
+          retention-days: 7
+
+      - name: Install the Thunderstore CLI
+        if: ${{ !inputs.dry-run }}
+        run: dotnet tool install -g tcli
+
+      - name: Publish
+        if: ${{ !inputs.dry-run }}
+        working-directory: build # tcli reads thunderstore.toml from here
+        env:
+          TCLI_AUTH_TOKEN: ${{ secrets.TCLI_AUTH_TOKEN }}
+        run: tcli publish --file schmidtwmark-RankedRace-*.zip
+
+      - name: Tag the release
+        if: ${{ !inputs.dry-run }}
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('mod/src/manifest.json'))['version_number'])")
+          git tag "v$version"
+          git push origin "v$version"

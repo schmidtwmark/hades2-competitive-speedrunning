@@ -4,3 +4,4 @@ scripts/.env.deck
 local/
 server/node_modules/
 server/dist/
+/build/
