@@ -13,7 +13,7 @@ A competitive speedrun race mod for Hades 2 — two to five players race the sam
 
 ## Common commands
 - Server: `cd server && npm run build` then `npm start` (`PORT`, `HOST`, `VOTE_SECONDS`, ... env vars). Tests: `npm test`.
-- Public server: Railway project `hades2-ranked-race` at `hopper.proxy.rlwy.net:16303` (TCP proxy). Redeploy: `scripts/railway-deploy.sh`.
+- Public server: Railway project `hades2-ranked-race` at `hopper.proxy.rlwy.net:16303` (TCP proxy), status page on its web domain (`STATUS_PORT` 8080). Redeploy: `scripts/railway-deploy.sh` (prints both addresses).
 - Everything: `scripts/suite.sh` (offline gates) or `scripts/suite.sh --game` (adds real-game gates on the test PC). Every gate prints `RESULT: PASS|FAIL`.
 - Mod: no build. `scripts/bazzite/push.sh` copies `mod/src/` and pinned dependencies into the test PC's instance roots.
 - Player install (no mod manager): `install/install.sh` / `install/install.ps1` with the pins in `install/packages.txt`; see INSTALL.md. Keep the pins in step with `local/thunderstore` and the launch option `--rom_enabled true` documented.

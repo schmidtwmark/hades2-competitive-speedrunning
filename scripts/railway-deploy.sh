@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Deploy the race server to Railway and expose it over a TCP proxy (the
-# server speaks raw TCP, not HTTP). Idempotent: reuses the project/service if
-# they exist. Prints "RAILWAY_ADDRESS=<host>:<port>" at the end.
+# Deploy the race server to Railway and expose it over a TCP proxy (the race
+# protocol is raw TCP, not HTTP), plus a Railway web domain for its public
+# status page (STATUS_PORT). Idempotent: reuses the project/service if they
+# exist. Prints "RAILWAY_ADDRESS=<host>:<port>" and "STATUS_URL=<url>" at the end.
 #   scripts/railway-deploy.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT=hades2-ranked-race
 SERVICE=race-server
 PORT=7777
+STATUS_PORT=8080
 cd "$ROOT/server"
 
 if ! railway list 2>/dev/null | grep -qx "  $PROJECT"; then
@@ -17,17 +19,17 @@ railway link --project "$PROJECT" >/dev/null 2>&1 || true
 if ! railway service status --service "$SERVICE" >/dev/null 2>&1; then
   railway add --service "$SERVICE" --variables "PORT=$PORT" --variables "HOST=::"
 fi
-railway variable set --service "$SERVICE" PORT=$PORT "HOST=::" >/dev/null 2>&1 || true
+railway variable set --service "$SERVICE" PORT=$PORT "HOST=::" STATUS_PORT=$STATUS_PORT >/dev/null 2>&1 || true
 # SKIP_UP=1: only (re)create the TCP proxy.
 if [ "${SKIP_UP:-0}" != 1 ]; then
   railway up --service "$SERVICE" --ci -m "race server $(git -C "$ROOT" rev-parse --short HEAD)"
 fi
 
-# TCP proxy through Railway's public GraphQL API (no CLI command for it).
+# TCP proxy and web domain through Railway's public GraphQL API (no CLI command for the proxy).
 STATUS_JSON="$(railway status --json)"
-python3 - "$STATUS_JSON" "$SERVICE" "$PORT" <<'PY'
+python3 - "$STATUS_JSON" "$SERVICE" "$PORT" "$STATUS_PORT" <<'PY'
 import json, os, sys, urllib.request
-status, service_name, port = json.loads(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+status, service_name, port, status_port = json.loads(sys.argv[1]), sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 token = json.load(open(os.path.expanduser("~/.railway/config.json")))["user"]["token"]
 
 def gql(query, variables):
@@ -59,4 +61,12 @@ if not proxy:
     proxy = gql("mutation($i:TCPProxyCreateInput!){ tcpProxyCreate(input:$i){ domain proxyPort applicationPort } }",
                 {"i": {"serviceId": service_id, "environmentId": env_id, "applicationPort": port}})["tcpProxyCreate"]
 print(f"RAILWAY_ADDRESS={proxy['domain'].rstrip('.')}:{proxy['proxyPort']}")
+
+domains = gql("query($p:String!,$s:String!,$e:String!){ domains(projectId:$p, serviceId:$s, environmentId:$e){ serviceDomains{ domain targetPort } } }",
+              {"p": status["id"], "s": service_id, "e": env_id})["domains"]["serviceDomains"]
+web = next((d for d in domains if d["targetPort"] == status_port), None)
+if not web:
+    web = gql("mutation($i:ServiceDomainCreateInput!){ serviceDomainCreate(input:$i){ domain targetPort } }",
+              {"i": {"serviceId": service_id, "environmentId": env_id, "targetPort": status_port}})["serviceDomainCreate"]
+print(f"STATUS_URL=https://{web['domain']}/")
 PY

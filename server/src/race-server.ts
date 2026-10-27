@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { BotBrain } from "./bot-brain.js";
 import { isQuickLine } from "./chat.js";
 import { PbStore } from "./pb-store.js";
+import { REGIONS } from "./pools.js";
 import { RaceLogStore } from "./race-log-store.js";
 import {
   NO_PREFERENCE,
@@ -105,6 +106,30 @@ interface RunResult {
   stats?: RunStats;
   build?: BuildEntry[];
   splits?: Split[];
+}
+
+/** One lobby past its waiting room, as the public status page shows it. */
+export interface PublicRace {
+  state: "voting" | "getting_ready" | "racing";
+  /** Display names of what was voted; null until decided. */
+  route: string | null;
+  weapon: string | null;
+  /** Racers who aren't house bots. */
+  racers: number;
+  bot: boolean;
+  /** Seconds since the start (racing only). */
+  elapsed: number | null;
+  /** Racers done: cleared, fallen or forfeited. */
+  done: number;
+  /** The deepest racer's region and depth (racing, once someone reported a room). */
+  furthest: { region: string | null; depth: number } | null;
+}
+
+export interface PublicStatus {
+  online: number;
+  searching: number;
+  racing: number;
+  races: PublicRace[];
 }
 
 interface RaceState extends RaceSetup {
@@ -425,6 +450,44 @@ export class RaceServer {
       }
     }
     return { online, searching, racing };
+  }
+
+  /**
+   * For the public status page: the presence counts and every lobby past its
+   * waiting room. No racer names and no lobby codes (a private race's code lets
+   * anyone join it).
+   */
+  publicStatus(): PublicStatus {
+    const races: PublicRace[] = [];
+    const name = (phase: VotePhase, id: string | null | undefined) =>
+      id ? (this.opts.pools[phase]?.find((o) => o.id === id)?.name ?? null) : null;
+    for (const lobby of this.lobbies.values()) {
+      if (lobby.phase === "waiting" || lobby.phase === "finished") continue;
+      const race = lobby.race;
+      const startAt = race?.startAt ?? null;
+      const racing = lobby.phase === "racing" && race !== null && startAt !== null;
+      const ids = racing ? race.entrants.map((e) => e.id) : lobby.players.map((p) => p.id);
+      const bots = ids.filter((id) => this.sessions.get(id)?.bot).length;
+      let furthest: PublicRace["furthest"] = null;
+      if (racing) {
+        for (const p of race.progress.values()) {
+          if (!furthest || p.depth > furthest.depth) furthest = { region: (p.biome && REGIONS[p.biome]) || null, depth: p.depth };
+        }
+      }
+      races.push({
+        state: racing ? "racing" : votePhaseOf(lobby.phase) ? "voting" : "getting_ready",
+        route: name("route", lobby.selected.route),
+        weapon: name("weapon", lobby.selected.weapon),
+        racers: ids.length - bots,
+        bot: bots > 0,
+        elapsed: racing ? Math.floor((this.opts.scheduler.now() - startAt) / 1000) : null,
+        done: racing ? race.results.size : 0,
+        furthest,
+      });
+    }
+    // Races first, longest-running first; then lobbies still voting or getting ready.
+    races.sort((a, b) => (b.elapsed ?? -1) - (a.elapsed ?? -1));
+    return { ...this.presence(), races };
   }
 
   /** The counts may have changed: tell everyone, at most once a second and only on a change. */

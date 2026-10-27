@@ -2,7 +2,9 @@ import { KEEPSAKES, routes, WEAPONS } from "./pools.js";
 import { PbStore } from "./pb-store.js";
 import { RaceLogStore } from "./race-log-store.js";
 import { RaceServer, realRandom, realScheduler } from "./race-server.js";
+import { listenStatus } from "./status-page.js";
 import { listen } from "./tcp.js";
+import { LATEST_MOD_VERSION } from "./versions.js";
 
 const env = process.env;
 const port = Number(env.PORT ?? 7777);
@@ -31,11 +33,19 @@ const server = new RaceServer({
 
 const tcp = await listen(server, port, host, log);
 log(`listening on ${host}:${port}`);
+// The public status page (counts and races under way), on its own port.
+const statusPort = env.STATUS_PORT ? Number(env.STATUS_PORT) : null;
+const web =
+  statusPort === null
+    ? null
+    : await listenStatus(server, statusPort, host, { latestMod: env.LATEST_MOD_VERSION || LATEST_MOD_VERSION });
+if (web) log(`status page on ${host}:${statusPort}`);
 const sweeper = setInterval(() => server.sweep(), 60_000);
 
 const shutdown = () => {
   clearInterval(sweeper);
   tcp.close();
+  web?.close();
   process.exit(0);
 };
 process.on("SIGINT", shutdown);

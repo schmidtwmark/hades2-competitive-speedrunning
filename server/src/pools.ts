@@ -17,6 +17,20 @@ export function routes(list?: string): VoteOption[] {
   return ALL_ROUTES.filter((r) => ids.includes(r.id));
 }
 
+// Regions by the code racers report as progress.biome (the game's RoomSetName;
+// the mod's hud.lua has the same table).
+export const REGIONS: Record<string, string> = {
+  F: "Erebus",
+  G: "Oceanus",
+  H: "Fields of Mourning",
+  I: "Tartarus",
+  N: "Ephyra",
+  O: "Thessaly",
+  P: "Olympus",
+  Q: "Summit",
+  Chaos: "Chaos",
+};
+
 export const WEAPONS: VoteOption[] = [
   { id: "WeaponStaffSwing", name: "Witch's Staff" },
   { id: "WeaponDagger", name: "Sister Blades" },

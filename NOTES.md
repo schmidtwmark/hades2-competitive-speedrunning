@@ -537,6 +537,14 @@ default urllib one gets 403). Verified: two mock bots over the internet, and the
 mode (`REMOTE_SERVER=hopper.proxy.rlwy.net:16303 COMPETITIVE=1 scripts/e2e-vs-mock.sh`): PASS, saves untouched.
 The first deploy waited out a Railway-wide build pause (2026-10-20).
 
+Public status page (2026-10-27): with `STATUS_PORT` set (Railway: 8080) the server also serves HTTP there,
+on a Railway web domain that `scripts/railway-deploy.sh` creates (`serviceDomainCreate`, targetPort 8080;
+it prints `STATUS_URL`). `GET /` is a page rendered on the server that reloads every 15 s (no scripts; its
+CSP allows only its own style block, by hash) and `GET /status.json` the same snapshot: the presence counts
+and each lobby past its waiting room (route, weapon, racers, clock, furthest region). No racer names and no
+lobby codes, since a private race's code lets anyone join it. One snapshot is served for 10 s, so viewers
+don't add work per request. Checked locally with three mock racers (page at desktop and phone width).
+
 ## Deployment (owner's r2modman profile on the test PC)
 
 `scripts/bazzite/deploy-r2modman.sh` installs the mod and the tested Hell2Modding 1.0.117 / ModUtil 4.0.1
