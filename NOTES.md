@@ -225,7 +225,8 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   remove the old `schmidtwmark-RankedRace` plugin folder (two copies would load) and move its
   `plugins_data` and `config` folders over. Internal names (`RankedRace_*` globals, MapState keys,
   the Railway project `hades2-ranked-race`) stay.
-- **Thunderstore release** (prepared 0.6.4, not yet published): `scripts/thunderstore-package.sh` builds
+- **Thunderstore release** (first published 0.6.7 on 2026-10-27 by the workflow, tag `v0.6.7`;
+  thunderstore.io/c/hades-ii/p/schmidtwmark/Hades_2_Competitive_Speedrunning/): `scripts/thunderstore-package.sh` builds
   `build/schmidtwmark-Hades_2_Competitive_Speedrunning-<version>.zip` (flat: mod/src, `thunderstore/` icon + README +
   CHANGELOG, LICENSE; the layout of SGG_Modding-ModUtil's package) and `build/thunderstore.toml`
   for tcli, both from `mod/src/manifest.json`, after checking Thunderstore's rules (name, Major.
@@ -233,9 +234,8 @@ machinery, so a controller works everywhere; the ImGui window (F8) is debug only
   pins, 256x256 icon, a changelog section for the version, LATEST_MOD_VERSION and main.lua's VERSION
   equal). Community `hades-ii`, categories mods, gameplay, ai-generated. `.github/workflows/thunderstore.yml`
   (manual; dry run by default) builds, keeps the zip, and on a real run `tcli publish`es with the
-  `TCLI_AUTH_TOKEN` secret and tags `v<version>`. Owner-only steps: the Thunderstore team must be
-  named `schmidtwmark` (the plugin folder), its service-account token goes in the GitHub secret, and
-  the icon is a placeholder. A mod-manager install (`Board.install_kind`: r2modman / Thunderstore
+  `TCLI_AUTH_TOKEN` secret and tags `v<version>`. The Thunderstore team is `schmidtwmark` (the plugin folder); its
+  service-account token is the GitHub secret. A mod-manager install (`Board.install_kind`: r2modman / Thunderstore
   Mod Manager / Gale profile folders) gets "update in your mod manager" on How to Update. Store
   screenshots are `docs/screenshots/*.jpg`, linked by raw.githubusercontent.com URLs.
 - **Keepsake grants** (0.6.4): Jeweled Pom (`HadesAndPersephoneKeepsake`,
