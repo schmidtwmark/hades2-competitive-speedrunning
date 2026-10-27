@@ -45,6 +45,9 @@
 --   expect_best   the route vote must list a personal best ("Best on ...")
 --   use_board     do lobby actions by pressing Race Board controls (the same
 --                 path a controller press takes) instead of calling the client
+--   fear          { VowName = rank }: take these Oath of the Unseen vows in the prep time
+--   forfeit_flipped  outcome "forfeit": forfeit in the first mirrored room after the first (by `rooms` at the latest)
+--   expect_rival_fear  a rival must have shown Fear on the plate by the result
 
 local Bot = {}
 Bot.__index = Bot
@@ -511,6 +514,15 @@ function Bot:step_lobby(now, c, st)
 		self:probe_prep(now)
 		return
 	end
+	if phase == 'ready_check' and self.cfg.fear and not self.fear_set then
+		-- What the Oath of the Unseen's vows set; the run applies them when it starts.
+		self.fear_set = true
+		local GS = self.game.G.GameState
+		GS.ShrineUpgrades = GS.ShrineUpgrades or {}
+		for name, rank in pairs(self.cfg.fear) do GS.ShrineUpgrades[name] = rank end
+		self.fear_gs = GS
+		self.log('bot: took the vows for ' .. self.game:fear() .. ' Fear')
+	end
 	if phase == 'ready_check' and not self.readied and not self:wait_dwell('ready', now) then
 		self.readied = true
 		if self.cfg.chat_hold and self.cfg.use_board then
@@ -759,6 +771,15 @@ function Bot:swap_boon_test(now)
 end
 
 function Bot:step_play(now, c, st)
+	if self.cfg.expect_rival_fear and not self.rival_fear then
+		for _, rival in ipairs(c:rivals()) do
+			local stats = rival.progress and rival.progress.stats
+			if stats and (stats.Fear or 0) > 0 then
+				self.rival_fear = { fear = stats.Fear, line = self.game.hud and self.game.hud.name_line(rival) }
+				self.log('bot: rival plate: ' .. tostring(self.rival_fear.line))
+			end
+		end
+	end
 	if st.result then return self:go_step('result') end
 	if self.cfg.swap_boon_test and self:swap_boon_test(now) then return end
 	-- race_menu_peek: once, mid-run, open the pause menu's Race Menu and its chat page, then back.
@@ -774,13 +795,29 @@ function Bot:step_play(now, c, st)
 		pcall(self.game.note_fire, self.game, { name = st.race and st.race.weapon })
 	end
 	local target = self.cfg.rooms or 2
+	if self.cfg.forfeit_flipped and self.rooms_done >= 1 and self.rooms_done < target then
+		local room = self.game.G.CurrentRun and self.game.G.CurrentRun.CurrentRoom
+		if room and room.Flipped then target = self.rooms_done end
+	end
 	if self.rooms_done < target then
 		local res = self.game:bot_advance_room()
 		if res == 'advanced' then
 			self.rooms_done = self.rooms_done + 1
 			local info = self.game:run_info()
 			self.trace[#self.trace + 1] = info and info.room or '?'
-			self.log('bot: advanced to room ' .. tostring(info and info.room) .. ' (' .. self.rooms_done .. '/' .. target .. ')')
+			self.log('bot: advanced to room ' .. tostring(info and info.room) .. ' (' .. self.rooms_done .. '/' .. target .. ')'
+				.. (self.cfg.fear and (' Fear ' .. tostring(self.game:run_stats().Fear) .. ' vows ' .. (function()
+					local GS, out = self.game.G.GameState, {}
+					for k, v in pairs(GS and GS.ShrineUpgrades or {}) do out[#out + 1] = k .. '=' .. tostring(v) end
+					return table.concat(out, ',') .. (GS == self.fear_gs and ' same GameState' or ' NEW GameState')
+				end)()) or '')
+				.. (self.cfg.expect_rival_fear and (' rival stats Fear ' .. table.concat((function()
+					local out = {}
+					for _, r in ipairs(c:rivals()) do
+						out[#out + 1] = tostring(r.progress and r.progress.stats and r.progress.stats.Fear)
+					end
+					return out
+				end)(), ',')) or ''))
 		elseif res == 'failed' then
 			return self:finish(false, 'could not advance room ' .. self.rooms_done)
 		end
@@ -802,6 +839,10 @@ function Bot:step_play(now, c, st)
 		if outcome == 'die' then
 			self.game:bot_kill_hero()
 		elseif outcome == 'forfeit' then
+			local room = self.game.G.CurrentRun and self.game.G.CurrentRun.CurrentRoom
+			self.log('bot: forfeiting in ' .. tostring(room and room.Name) .. (room and room.Flipped and ' (mirrored)' or ''))
+			-- Not a check: some seeds have no mirrored room early on (the home check still runs).
+			if self.cfg.forfeit_flipped and not (room and room.Flipped) then self.log('bot: no mirrored room by now') end
 			-- What "Forfeit Race" in the pause menu does, then the prompt's Forfeit.
 			self:check('forfeit prompt offered', self.game:request_forfeit())
 			if self.cfg.use_board then
@@ -870,6 +911,9 @@ function Bot:step_result(now, c, st)
 			local ok, build = pcall(self.game.build_list, self.game)
 			local n = ok and type(build) == 'table' and #build or -1
 			self:check('boons cleared back home', n == 0, 'boons=' .. n)
+			local f = self.game:fn('GetConfigOptionValue')
+			local flipped = f and f({ Name = 'FlipMapThings' })
+			self:check('training grounds not mirrored', f ~= nil and not flipped, 'FlipMapThings=' .. tostring(flipped))
 		else
 			self.log('bot: not back in the Crossroads; boons not checked')
 		end
@@ -894,6 +938,11 @@ function Bot:step_result(now, c, st)
 			if rival.name == self.cfg.expect_rival then depth = rival.progress and rival.progress.depth end
 		end
 		self:check('rival ' .. self.cfg.expect_rival .. ' reported its rooms', (depth or 0) >= 1, 'depth=' .. tostring(depth))
+	end
+	if self.cfg.expect_rival_fear then
+		local seen = self.rival_fear or {}
+		self:check('rival Fear on the plate', seen.line ~= nil and seen.line:find(' Fear$') ~= nil,
+			'fear=' .. tostring(seen.fear) .. ' line=' .. tostring(seen.line))
 	end
 	if self.cfg.expect_results then
 		self:check('results list', #(r.results or {}) == self.cfg.expect_results, #(r.results or {}) .. ' racers')

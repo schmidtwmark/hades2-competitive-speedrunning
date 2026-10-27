@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.7 (beta)
+- Fear from the Oath of the Unseen now lasts into the race. Before, the game dropped
+  every vow when the race's first room loaded (competitive mode's Oath didn't count as
+  unlocked), so a Fear handicap never applied.
+- A racer's Fear shows next to their name on the rival plate, and as the first row of
+  the results, so a handicap is plain to everyone.
+- Going home after a race (forfeit, fall or clear) no longer mirrors the training
+  grounds when the race ended in a mirrored room.
+
 ## 0.6.6 (beta)
 - First release on Thunderstore, as Hades 2 Competitive Speedrunning (H2CS), a beta.
 - Installed with the script before? It moves your bests, loadout and name to the new

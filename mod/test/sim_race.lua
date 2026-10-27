@@ -56,9 +56,11 @@ local mutations = mutate and { [mutate] = true } or {}
 -- The guest deliberately diverges: other door, and its in-room actions use a
 -- different amount of RNG (like different crits/procs in the real game).
 local host = make('Host', { role = 'host', weapon = 'WeaponAxe', keepsake = 'LowHealthCritKeepsake', rooms = 4, outcome = 'win',
-	win_after_opponent_death = true, expect = 'win', expect_reason = 'survivor_finished', mutations = mutations }, 0)
+	win_after_opponent_death = true, expect = 'win', expect_reason = 'survivor_finished', mutations = mutations,
+	expect_rival_fear = true }, 0)
 local guest = make('Guest', { role = 'join', weapon = 'WeaponAxe', keepsake = 'LowHealthCritKeepsake', rooms = 4, outcome = 'die', expect = 'lose',
-	expect_reason = 'survivor_finished', door_pick = 'highest', mutations = mutations }, progress_b, 7)
+	expect_reason = 'survivor_finished', door_pick = 'highest', mutations = mutations,
+	fear = { EnemyDamageShrineUpgrade = 2 } }, progress_b, 7)
 
 local function read(path)
 	local f = io.open(path, 'r')

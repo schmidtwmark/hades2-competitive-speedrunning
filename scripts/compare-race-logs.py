@@ -11,7 +11,8 @@ only), and store stock. What each racer picked is shown but never counts as a
 difference. Per pair it ends with "SEEDING: SAME" or "SEEDING: DIFFERENT (...)",
 then "FAIRNESS: ...": offers can only be expected to match while both racers
 have made the same choices (doors, boons, buys), so a difference before their
-choices first split is the one that means an unfair race.
+choices first split is the one that means an unfair race. Racers with different
+Fear (Oath of the Unseen vows) can't be expected to match at all.
 """
 import json
 import sys
@@ -42,7 +43,10 @@ def load(path):
 def loadout_line(lo):
     if not lo:
         return "(not logged)"
-    return f"aspect={lo.get('aspect')} keepsake={lo.get('keepsake')} familiar={lo.get('familiar')} arcana={','.join(lo.get('arcana') or []) or '-'}"
+    line = f"aspect={lo.get('aspect')} keepsake={lo.get('keepsake')} familiar={lo.get('familiar')} arcana={','.join(lo.get('arcana') or []) or '-'}"
+    if lo.get("fear"):
+        line += f" fear={lo['fear']} vows={','.join(lo.get('vows') or [])}"
+    return line
 
 
 def room_line(evs):
@@ -113,6 +117,13 @@ def compare(path_a, path_b):
     same_loadout = kit(sa["loadout"]) == kit(sb["loadout"]) or not (sa["loadout"] and sb["loadout"])
     if not same_loadout:
         print("  (their loadouts differ: some offers may differ because of them)")
+    # Fear (Oath of the Unseen vows) is a handicap a racer picks: vows change
+    # foes, offers and prices, so nothing has to match.
+    def vows(lo):
+        return lo and (lo.get("vows") or [])
+    same_vows = vows(sa["loadout"]) == vows(sb["loadout"]) or not (sa["loadout"] and sb["loadout"])
+    if not same_vows:
+        print("  (their Fear differs: their Vows change foes, offers and prices)")
     diffs = []
     unfair = []
     split_at = None  # first depth where their choices differed
@@ -177,6 +188,9 @@ def compare(path_a, path_b):
     shared = f"depths 1-{split_at}" if split_at else f"all {last} depths"
     if unfair:
         where = ", ".join(f"{label} at depth {d}" for d, label in unfair)
+        if not same_vows:
+            print(f"FAIRNESS: FEAR DIFFERS ({where}: a racer's Vows change what they meet)")
+            return True
         if not same_loadout and all(label.startswith("boon offer") or label == "keepsake grant" for _, label in unfair):
             print(f"FAIRNESS: LOADOUTS DIFFER ({where}: boon offers can depend on aspect and Arcana)")
             return True

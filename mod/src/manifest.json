@@ -1,6 +1,6 @@
 {
   "name": "Hades_2_Competitive_Speedrunning",
-  "version_number": "0.6.6",
+  "version_number": "0.6.7",
   "website_url": "https://github.com/schmidtwmark/hades2-competitive-speedrunning",
   "description": "Beta. Hades II speedrun races for 2-5 players: the same seed, rooms, foes and offers for everyone; native race board, rival plates and shadows, controller-first.",
   "dependencies": [

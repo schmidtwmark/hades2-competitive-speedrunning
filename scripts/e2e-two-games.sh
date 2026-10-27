@@ -24,6 +24,7 @@ GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /Require
 # QUEUE=1: both clients use Find Match instead of a private lobby code.
 # BOARD=1: lobby actions go through the native Race Board (code typed on its keys).
 # CODE=1: both clients enter the same random race code (no host).
+# SCENARIO=forfeit: B forfeits (from the pause menu path) after its rooms instead of dying.
 # SCENARIO=clear_then_forfeit: A clears first through the game's run clear
 #   screen; B is told mid-run, keeps going two more rooms, then forfeits.
 # ROUTE=surface|dream|underworld: what both bots vote for (default underworld).
@@ -31,6 +32,7 @@ GAME_ARGS="/Windowed=true /Fullscreen=false $RES /DirectLoadShell=false /Require
 # RACE_SEED=n: every race uses seed n (local server only), e.g. 824876918 opens with Selene's hex.
 # PROBE_PREP=1: A checks the Crossroads set-up during the prep time (bot.lua probe_prep).
 # BOT_EXTRA='"welcome_dwell":5': extra bot.json fields for both bots.
+# BOT_EXTRA_A / BOT_EXTRA_B: extra bot.json fields for one of them.
 # MOCKS=n: n mock racers (on this Mac) also join A's private lobby, and A starts
 #   once all 2+n are in. The mocks fall early (MOCK_DIE_AFTER s into the race,
 #   10 s apart); A clears after its rooms, B dies after its rooms.
@@ -76,15 +78,18 @@ for X in A B; do
     if [ "$X" = A ]; then EXTRA='"outcome":"win","clear_screen":true,"expect":"win","expect_reason":"completed_first"'
     else EXTRA='"outcome":"forfeit","rooms":'$((ROOMS + 2))',"expect":"lose","expect_reason":"completed_first"'; fi
   fi
+  # SCENARIO=forfeit: B forfeits after its rooms (survivor A clears once it sees that).
+  [ "${SCENARIO:-}" = forfeit ] && [ "$X" = B ] && EXTRA='"outcome":"forfeit","expect":"lose","expect_reason":"survivor_finished"'
   if [ "$MOCKS" -gt 0 ]; then
     if [ "$X" = A ]; then EXTRA='"outcome":"win","clear_screen":true,"expect":"win","start_at":'$((2 + MOCKS))
     else EXTRA='"outcome":"die","expect":"lose"'; fi
   fi
+  ONE_VAR="BOT_EXTRA_$X"; ONE="${!ONE_VAR:-}"
   [ "${QUEUE:-0}" = 1 ] && ROLE=queue
   [ "${CODE:-0}" = 1 ] && ROLE=code
   cat >"$RUN/bot-$X.json" <<JSON
 {"role":"$ROLE","name":"Bot$X","server_host":"$MAC_IP","server_port":$PORT,"rooms":$ROOMS,
- ${BOT_EXTRA:+$BOT_EXTRA,}"code_file":"Z:$TB/run/code","route":"${ROUTE:-underworld}","ready_via_door":${READY_VIA_DOOR:-false},"chat":"Good luck!","weapon":"WeaponAxe","keepsake":"${KEEPSAKE:-BossPreDamageKeepsake}",
+ ${BOT_EXTRA:+$BOT_EXTRA,}${ONE:+$ONE,}"code_file":"Z:$TB/run/code","route":"${ROUTE:-underworld}","ready_via_door":${READY_VIA_DOOR:-false},"chat":"Good luck!","weapon":"WeaponAxe","keepsake":"${KEEPSAKE:-BossPreDamageKeepsake}",
  "timeout":$((TIMEOUT - 60)),"quit_after":${QUIT_AFTER:-5},"show_ui":${SHOW_UI:-true},"dwell":${DWELL:-0},"expect_overlay":$([ "${OVERLAY:-0}" = 1 ] && echo true || echo false),"use_board":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"expect_results_screen":$([ "${BOARD:-0}" = 1 ] && echo true || echo false),"race_code":"$RACE_CODE","mutations":{$MUT_JSON},$COMP_JSON$PICK
  $EXTRA}
 JSON

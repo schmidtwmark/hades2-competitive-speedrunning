@@ -895,8 +895,13 @@ function Game:race_loadout(weapon)
 		if type(st) == 'table' and st.Equipped then arcana[#arcana + 1] = name end
 	end
 	table.sort(arcana)
+	local vows = {}
+	for name, rank in pairs(GS.ShrineUpgrades or {}) do
+		if type(rank) == 'number' and rank > 0 then vows[#vows + 1] = name .. '=' .. rank end
+	end
+	table.sort(vows)
 	return { aspect = GS.LastWeaponUpgradeName and GS.LastWeaponUpgradeName[weapon], arcana = arcana,
-		familiar = GS.EquippedFamiliar, keepsake = GS.LastAwardTrait }
+		familiar = GS.EquippedFamiliar, keepsake = GS.LastAwardTrait, fear = self:fear(), vows = vows }
 end
 
 -- StartNewRun draws randomness that depends on the save (e.g. the unused-weapon
@@ -1098,9 +1103,18 @@ function Game:go_home(why)
 	self:spawn(function()
 		if G.wait then G.wait(0.5) end
 		self:clear_run_upgrades()
+		self:unflip()
 		G.LoadMap({ Name = 'Hub_PreRun' })
 	end)
 	return true
+end
+
+-- The engine mirrors every map loaded while FlipMapThings is on, and the
+-- game only sets it on arrival for the room the run is in. KillHero and
+-- StartOver turn it off before their maps; going home without them would
+-- mirror the training grounds whenever the race ended in a mirrored room.
+function Game:unflip()
+	self:call('SetConfigOption', { Name = 'FlipMapThings', Value = false })
 end
 
 -- What KillHero does before the death map: the run's boons, hammers and
@@ -1142,6 +1156,7 @@ function Game:die_and_go_home(triggerArgs)
 		run.NextHeroStartPoint, run.NextHeroEndPoint = 40009, 40012
 		if G.SessionMapState then G.SessionMapState.HandlingDeath = false end
 		self:clear_run_upgrades()
+		self:unflip()
 		G.LoadMap({ Name = 'Hub_PreRun' })
 	end)
 	return true
@@ -1184,6 +1199,7 @@ function Game:enter_competitive()
 	self.log('game: entering competitive mode; loading Hub_PreRun without a profile')
 	-- LoadMap is a Lua wrapper that wait()s; on the title screen there is no
 	-- game coroutine (and no threads to kill), so call the engine directly.
+	self:unflip() -- a normal run quit in a mirrored room leaves it on
 	self:call('LoadMapInternal', { Name = 'Hub_PreRun' })
 end
 
@@ -1390,6 +1406,8 @@ function Game:verify_competitive_profile()
 	local room = G.CurrentRun and G.CurrentRun.CurrentRoom
 	check('the last room has an encounter', room ~= nil and type(room.Encounter) == 'table', room and tostring(room.Name))
 	check('no fear', next(GS.ShrineUpgrades or {}) == nil)
+	check('the Oath of the Unseen keeps vows', G.IsGameStateEligible ~= nil
+		and G.IsGameStateEligible(nil, { NamedRequirements = { 'ShrineUnlocked' } }) == true)
 	check('eagle already introduced', GS.IntroducedEagle == true)
 	-- Every Erebus miniboss room can come up (two gate on repeat Root-Stalker wins).
 	if G.IsGameStateEligible and G.RoomData then
@@ -1746,7 +1764,21 @@ function Game:run_stats()
 		Hammers = int(hero.HammerCount),
 		Boons = #self:build_list(),
 		MaxHealth = int(hero.MaxHealth),
+		Fear = self:fear(),
 	}
+end
+
+-- The Oath of the Unseen's Fear: each racer may handicap themselves in the
+-- prep time. Rivals see it on the plate and in the results.
+function Game:fear()
+	local f = self:fn('GetTotalSpentShrinePoints')
+	if not f then return 0 end
+	local ok, n = pcall(f)
+	if not ok and not self.fear_failed then
+		self.fear_failed = true
+		self.log('game: reading Fear failed: ' .. tostring(n))
+	end
+	return ok and math.floor((tonumber(n) or 0) + 0.5) or 0
 end
 
 -- Pause menu "Race Menu" (or Quit) during a live race: the Race Board shows

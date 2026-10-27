@@ -28,6 +28,12 @@ local function fake_game(sim, opts)
 	G.wait = function() coroutine.yield() end
 	G.GameState = { LastAwardTrait = 'OriginalKeepsake', LastWeaponUpgradeName = { WeaponAxe = 'AxeArmCastAspect' },
 		Progress = opts.progress or 0 }
+	-- The Oath of the Unseen: a point of Fear per vow rank.
+	G.GetTotalSpentShrinePoints = function()
+		local n = 0
+		for _, rank in pairs(G.GameState.ShrineUpgrades or {}) do n = n + rank end
+		return n
+	end
 	G.WeaponData = {}
 	for _, w in ipairs({ 'WeaponStaffSwing', 'WeaponDagger', 'WeaponTorch', 'WeaponAxe', 'WeaponLob', 'WeaponSuit' }) do
 		G.WeaponData[w] = { Name = w }
@@ -88,8 +94,14 @@ local function fake_game(sim, opts)
 		end
 		return { Name = 'Generated' .. rng(1000), SpawnWaves = waves }
 	end
+	-- Engine config options. FlipMapThings mirrors every map loaded while it is on;
+	-- the game sets it on arrival only for the run's own room (OnAnyLoad).
+	G.Config = {}
+	function G.SetConfigOption(a) G.Config[a.Name] = a.Value end
+	function G.GetConfigOptionValue(a) return G.Config[a.Name] end
 	function G.LoadMap(args)
 		G.RandomInit()
+		if args.Room and args.Room.Flipped ~= nil then G.Config.FlipMapThings = args.Room.Flipped end
 		local room = args.Room or { Name = args.Name }
 		room.Encounter = room.Encounter or G.ChooseEncounter(G.CurrentRun, room)
 		room.ChosenRewardType = room.ChosenRewardType or 'Boon'

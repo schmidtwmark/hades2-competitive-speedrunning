@@ -403,6 +403,16 @@ function Profile.build(G, saved)
 		G.CurrentRun = saved
 	end
 	summary.completed_runs = G.GetCompletedRuns()
+	-- The Oath of the Unseen counts as unlocked (RequirementsData ShrineUnlocked:
+	-- a clear and Chronos defeated, as the true ending implies). Otherwise
+	-- DoPatches, on every map load, empties GameState.ShrineUpgrades, and Fear
+	-- set in the prep time is gone by the race's first room. RecordRunStats only
+	-- recounts clears when a run is cleared, and then counts that one.
+	GS.ClearedRunsCache = math.max(GS.ClearedRunsCache or 0, STUB_RUNS)
+	GS.ClearedUnderworldRunsCache = math.max(GS.ClearedUnderworldRunsCache or 0, STUB_RUNS)
+	GS.ClearedSurfaceRunsCache = math.max(GS.ClearedSurfaceRunsCache or 0, STUB_RUNS)
+	GS.EnemyKills = GS.EnemyKills or {}
+	GS.EnemyKills.Chronos = math.max(GS.EnemyKills.Chronos or 0, 1)
 	GS.GamePhase = 5
 	GS.GamePhaseRunsRemaining = 2
 	GS.NextBiomeStateName = nil

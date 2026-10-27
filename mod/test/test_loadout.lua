@@ -87,6 +87,33 @@ T.case('race loadout: competitive puts the voted weapon and keepsake in hand onc
 	T.eq(G2.GameState.LastAwardTrait, 'OldKeepsake')
 end)
 
+T.case('going home: the training grounds load unmirrored after a race in a mirrored room', function()
+	local g, G = fake_hub('racing', { weapon = 'WeaponStaffSwing', keepsake = 'BossPreDamageKeepsake' })
+	G.CurrentRun.CurrentRoom = { Name = 'F_Combat05', Flipped = true }
+	local flip = true
+	G.SetConfigOption = function(a) if a.Name == 'FlipMapThings' then flip = a.Value end end
+	local loaded
+	G.LoadMap = function(a) loaded = { name = a.Name, flipped = flip } end
+	T.truthy(g:go_home('forfeit'))
+	T.eq(loaded and loaded.name, 'Hub_PreRun')
+	T.eq(loaded and loaded.flipped, false, 'FlipMapThings is off before the hub loads')
+	flip, loaded = true, nil
+	G.DeathPresentation = function() end
+	T.truthy(g:die_and_go_home({}))
+	T.eq(loaded and loaded.flipped, false, 'and after a death')
+end)
+
+T.case('fear: the Oath of the Unseen total goes in the stats and the loadout', function()
+	local g, G = fake_hub('racing', { weapon = 'WeaponStaffSwing', keepsake = 'BossPreDamageKeepsake' })
+	T.eq(g:run_stats().Fear, 0, 'no Oath function: no Fear')
+	G.GameState.ShrineUpgrades = { EnemyHealthShrineUpgrade = 2, EnemyCountShrineUpgrade = 0 }
+	G.GetTotalSpentShrinePoints = function() return 6 end
+	T.eq(g:run_stats().Fear, 6)
+	local lo = g:race_loadout('WeaponStaffSwing')
+	T.eq(lo.fear, 6)
+	T.eq(table.concat(lo.vows, ','), 'EnemyHealthShrineUpgrade=2', 'vows at rank 0 are left out')
+end)
+
 T.case('profile: the Arcana screen\'s layout tables exist and DoPatches runs once built', function()
 	-- Only the tail of Profile.build matters here; build the minimum around it.
 	local GS
@@ -112,6 +139,9 @@ T.case('profile: the Arcana screen\'s layout tables exist and DoPatches runs onc
 	T.eq(type(GS.MetaUpgradeLayoutsArt), 'table')
 	T.eq(type(GS.SavedMetaUpgradeLayouts), 'table')
 	T.eq(GS.CurrentMetaUpgradeLayout, 1)
+	-- RequirementsData ShrineUnlocked, which DoPatches checks on every map load
+	-- (and empties the vows without): a clear and Chronos defeated.
+	T.truthy(GS.ClearedRunsCache >= 1 and GS.EnemyKills.Chronos >= 1, 'the Oath of the Unseen keeps its vows')
 	T.eq(G.Revision, Profile.REVISION, 'a fresh profile still belongs to this game revision')
 	G.Revision = nil
 	Profile.build(G, { revision = Profile.REVISION + 10 })

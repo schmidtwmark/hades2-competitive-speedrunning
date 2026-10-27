@@ -322,6 +322,18 @@ T.case('board: results compare both racers like the clear screen', function()
 	T.eq(by['Damage Taken'].win, 'them', 'less damage taken is better')
 	T.eq(by['Death Defiances Used'].win, nil, 'ties have no winner')
 	T.eq(by['Gold Earned'], nil, 'rows without data are left out')
+	T.eq(by['Fear'], nil, 'no Fear row when nobody took the Oath')
+	local feared = Board.compare({ name = 'Mel', stats = { Fear = 12, Kills = 3 } }, { name = 'Zag', stats = { Fear = 0, Kills = 5 } })
+	T.eq(feared.rows[1].label, 'Fear', 'Fear comes first')
+	T.eq(feared.rows[1].me .. '/' .. feared.rows[1].them, '12/0')
+	T.eq(feared.rows[1].win, nil, 'a handicap, not a contest')
+	local t = Board.standings({ { id = 'a', name = 'A', place = 1, stats = { Fear = 0 } }, { id = 'b', name = 'B', place = 2, stats = { Fear = 3 } },
+		{ id = 'c', name = 'C', place = 3, stats = {} } }, 'a')
+	T.eq(t.rows[1].label .. ':' .. table.concat(t.rows[1].cells, ','), 'Fear:0,3,-')
+	T.truthy(not (t.rows[1].best[1] or t.rows[1].best[2]), 'no gold for Fear')
+	t = Board.standings({ { id = 'a', name = 'A', place = 1, stats = { Fear = 0 } }, { id = 'b', name = 'B', place = 2, stats = { Fear = 0 } },
+		{ id = 'c', name = 'C', place = 3, stats = { Kills = 1 } } }, 'a')
+	T.eq(t.rows[1].label, 'Foes Slain', 'all at 0 Fear: no row')
 	T.eq((Board.result_line({ outcome = 'disconnect', victory = false })), 'Disconnected')
 end)
 

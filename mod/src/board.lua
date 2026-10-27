@@ -117,6 +117,7 @@ end
 
 -- Results screen rows (like the game's run clear screen): which way is better.
 Board.STAT_ROWS = {
+	{ key = 'Fear', label = 'Fear', hide_zero = true }, -- a handicap each racer picks: no gold
 	{ key = 'DamageDealt', label = 'Damage Dealt', better = 'high' },
 	{ key = 'DamageTaken', label = 'Damage Taken', better = 'low' },
 	{ key = 'Kills', label = 'Foes Slain', better = 'high' },
@@ -136,6 +137,15 @@ function Board.result_line(e)
 	if type(e.time) ~= 'number' then return word, e.victory and GREEN or RED end
 	if e.victory then return word .. ' ' .. fmt_clock(e.time), GREEN end
 	return word .. ' at ' .. fmt_clock(e.time), RED
+end
+
+-- Rows like Fear only appear when someone has some.
+function Board.all_zero(row, vals, n)
+	if not row.hide_zero then return false end
+	for i = 1, n do
+		if (tonumber(vals[i]) or 0) ~= 0 then return false end
+	end
+	return true
 end
 
 -- Results table for three or more racers: a column per racer in finishing
@@ -158,7 +168,7 @@ function Board.standings(results, my_id)
 			vals[i] = (e.stats or {})[row.key]
 			if vals[i] ~= nil then any = true end
 		end
-		if any then
+		if any and not Board.all_zero(row, vals, #sorted) then
 			local best, all_same = nil, true
 			for i = 1, #sorted do
 				local v = vals[i]
@@ -188,7 +198,7 @@ function Board.compare(me, them)
 	local ms, ts = me.stats or {}, them.stats or {}
 	for _, row in ipairs(Board.STAT_ROWS) do
 		local a, b = ms[row.key], ts[row.key]
-		if a ~= nil or b ~= nil then
+		if (a ~= nil or b ~= nil) and not Board.all_zero(row, { a, b }, 2) then
 			local win
 			if row.better and type(a) == 'number' and type(b) == 'number' and a ~= b then
 				win = ((a > b) == (row.better == 'high')) and 'me' or 'them'

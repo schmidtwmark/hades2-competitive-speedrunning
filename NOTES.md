@@ -110,6 +110,20 @@ Inside a race run the mod re-seeds from `hash(raceSeed, tag, depth, ...)` at eac
 - `GetNextSpawn` / `HandleNextSpawn`: re-seeded per (depth, encounter, spawn #); combat RNG resumes from a value
   drawn before, so crits/procs aren't predictable from spawns. Spawn *points* still depend on hero position.
 
+Mirroring is the engine config option `FlipMapThings`: every map loads mirrored while it is on, and the
+game sets it on arrival only for the run's own room (RoomLogic OnAnyLoad). KillHero and StartOver turn it
+off before their maps; the mod's own trip home (forfeit, death, clear) must too, or the training grounds
+load mirrored after a race that ended in a mirrored room (seen in a real race; fixed in 0.6.7, checked by
+`SCENARIO=forfeit` with bot.json `forfeit_flipped`: forfeit in F_Combat08 mirrored, home with
+FlipMapThings=false).
+
+Fear (Oath of the Unseen): DoPatches, on every map load, empties `GameState.ShrineUpgrades` unless
+RequirementsData `ShrineUnlocked` holds (I_Boss01 entered, ClearedRunsCache >= 1, Chronos killed or a
+story reset). The competitive profile had no clears and no Chronos kill, so vows set in the prep time were
+gone by the first room (bot log: Fear 4 at StartNewRun, 0 in room 2). Since 0.6.7 the profile has both;
+Fear 4 then lasted every room (`scripts/e2e-house-bot.sh 3` with bot.json `fear`). Vows change foes and
+offers for that racer only, so the race report says FEAR DIFFERS rather than judging those offers.
+
 Evidence: `COMPETITIVE=1 DIVERGE=1 scripts/e2e-two-games.sh 6` on two real clients, B taking other doors
 (depths 2, 4, 5) and other boons: rooms, room seeds, mirroring, encounters, enemy rosters and spawn order
 identical for 7 depths (incl. the Treant miniboss, a Nemesis event); door rewards differed only where god
