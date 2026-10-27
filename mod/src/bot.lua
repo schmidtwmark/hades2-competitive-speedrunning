@@ -941,7 +941,8 @@ function Bot:step_result(now, c, st)
 	end
 	if self.cfg.expect_rival_fear then
 		local seen = self.rival_fear or {}
-		self:check('rival Fear on the plate', seen.line ~= nil and seen.line:find(' Fear$') ~= nil,
+		self:check('rival Fear on the plate', seen.line ~= nil
+			and seen.line:sub(-#self.game.hud.FEAR_ICON) == self.game.hud.FEAR_ICON,
 			'fear=' .. tostring(seen.fear) .. ' line=' .. tostring(seen.line))
 	end
 	if self.cfg.expect_results then

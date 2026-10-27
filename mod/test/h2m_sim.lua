@@ -161,6 +161,7 @@ local function fake_game(sim, opts)
 	function G.KillHero(victim)
 		victim.IsDead = true
 		G.wait(0.1)
+		G.Config.FlipMapThings = false -- as DeathLoopLogic's KillHero does before the death map
 		G.CurrentHubRoom = { Name = 'Hub_Main' } -- CurrentRun.CurrentRoom keeps the last run room, as in the game
 	end
 	function G.RecordRunCleared() G.CurrentRun.Cleared = true end

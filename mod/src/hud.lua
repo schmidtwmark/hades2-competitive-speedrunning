@@ -111,14 +111,14 @@ function Hud.status(st, r, many)
 	return many and 'RACING' or 'RIVAL', GREY
 end
 
--- The rival's name, then their Fear when they took on the Oath of the Unseen
--- (the game's own skull icon, as its texts write it).
+-- The rival's name, then their Fear when they took on the Oath of the Unseen:
+-- the number and the game's own skull icon, as its texts write it.
 Hud.FEAR_ICON = '{!Icons.ShrinePointNoTooltip}'
 function Hud.name_line(r)
 	local stats = r.progress and r.progress.stats
 	local fear = math.floor(tonumber(stats and stats.Fear) or 0)
 	if fear <= 0 then return safe_name(r.name) end
-	return safe_name(r.name) .. '   ' .. fear .. Hud.FEAR_ICON .. ' Fear'
+	return safe_name(r.name) .. '   ' .. fear .. Hud.FEAR_ICON
 end
 
 -- Everyone shares one clock (shown once, at the top); a finished rival's

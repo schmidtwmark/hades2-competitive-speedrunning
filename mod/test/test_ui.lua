@@ -143,7 +143,7 @@ T.case('hud: a rival\'s Fear follows their name', function()
 	T.eq(Hud.name_line({ name = 'Zag' }), 'Zag')
 	T.eq(Hud.name_line({ name = 'Zag', progress = { stats = { Fear = 0 } } }), 'Zag')
 	T.eq(Hud.name_line({ name = 'Z{a}g', progress = { stats = { Fear = 12 } } }),
-		'Zag   12{!Icons.ShrinePointNoTooltip} Fear', 'the name stays literal, the icon is the game\'s')
+		'Zag   12{!Icons.ShrinePointNoTooltip}', 'the name stays literal, the icon is the game\'s')
 end)
 
 T.case('hud: status line follows the race state', function()
