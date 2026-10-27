@@ -543,7 +543,8 @@ it prints `STATUS_URL`). `GET /` is a page rendered on the server that reloads e
 CSP allows only its own style block, by hash) and `GET /status.json` the same snapshot: the presence counts
 and each lobby past its waiting room (route, weapon, racers, clock, furthest region). No racer names and no
 lobby codes, since a private race's code lets anyone join it. One snapshot is served for 10 s, so viewers
-don't add work per request. Checked locally with three mock racers (page at desktop and phone width).
+don't add work per request. Checked locally with three mock racers (page at desktop and phone width), then
+live at https://race-server-production-2da9.up.railway.app/ (one hello over the TCP proxy showed as 1 online).
 
 ## Deployment (owner's r2modman profile on the test PC)
 

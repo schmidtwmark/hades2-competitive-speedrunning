@@ -46,7 +46,7 @@ cd server && npm install && npm run build && PORT=7777 npm start
 Plain TCP, newline-delimited JSON; message types are in `server/src/protocol.ts`.
 
 With `STATUS_PORT` set (Railway: 8080, on the service's web domain), the server
-also serves a public status page there: how many are online, looking for a
+also serves a public status page there ([live](https://race-server-production-2da9.up.railway.app/)): how many are online, looking for a
 match and racing, and each race under way, without racer names or lobby codes.
 `/status.json` has the same as data.
 
