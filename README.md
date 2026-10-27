@@ -1,21 +1,10 @@
 # Hades 2 Competitive Speedrunning (Beta)
 
-Hades 2 Competitive Speedrunning (H2CS) is a race mod for Hades II for two to five players. Racers meet on the in-game
-Race Board, vote on the route (Underworld, Surface or Dream Dive), a weapon and a keepsake,
-get two minutes to set Arcana, aspect and familiar, and start the same seeded
-run at the same moment. Every racer is offered the same rooms, foes, rewards,
-gods, boons and shop stock as far as their build allows. Quick-chat lines (no free
-text) work from the board and the pause menu. During the run you see each rival as a translucent shadow
-Melinoë (one colour per rival, attacking and dashing as they do) whenever you
-are in the same room, plus a rival
-plate (top right) with their biome and depth, how far ahead or behind you they
-are, their HP and (in a 1v1) their boons, under a single real-time race clock
-that never pauses (the game's own timer, which stops for menus and boon
-choices, is hidden). Everything works with a controller; no keyboard or mod
-keys needed.
+Hades 2 Competitive Speedrunning (H2CS) is a race mod for Hades II inspired by [Minecraft Speedrunning Ranked](https://wiki.mcsrranked.com)
 
-**Beta:** it runs real races, but expect rough edges. Please report bugs in
-[Issues](https://github.com/schmidtwmark/hades2-competitive-speedrunning/issues).
+Players race on identical seeds using matching weapons and starting keepsakes. Encounters and rewards will be the same -- the only difference is player skill. 
+
+H2CS uses a separate, maxed out save profile with all content unlocked. Expect to see spoilers!
 
 ![The Race Board: a private race, ready to vote](docs/screenshots/board.jpg)
 
@@ -24,15 +13,6 @@ keys needed.
 ![In a race: the rival's shadow Melinoë, the rival plate and the race clock with the region's best split](docs/screenshots/race.jpg)
 
 ![The results: a side-by-side comparison in a 1v1](docs/screenshots/results.jpg)
-
-Rules: the first racer to clear the run wins. Dying, forfeiting (pause menu →
-Forfeit Race) or disconnecting is a DNF: the others still have to clear to
-win, and if nobody clears it is a draw. If a rival clears first you have lost,
-but you can keep going to finish your run and post your time and place. When
-everyone is done, a results screen compares the runs: place, result and time,
-depth, damage dealt and taken, foes slain, healing, gold, death defiances and
-every racer's boons (side by side in a 1v1, a standings table for three or
-more).
 
 ## Play
 
@@ -45,12 +25,6 @@ has step-by-step instructions for an AI agent installing it for you.
 
 - Linux / Steam Deck: `curl -fsSL https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.sh | bash`
 - Windows (PowerShell): `irm https://raw.githubusercontent.com/schmidtwmark/hades2-competitive-speedrunning/main/install/update.ps1 | iex`
-
-Competitive mode gives both players the same fully maxed profile (every weapon, aspect, keepsake,
-familiar and Arcana card at max rank, Grasp 30, Fear 0) built in memory; it never reads or writes
-your saves. Each depth has the same room and enemies for both players whatever doors and boons they
-pick; choices only change rewards. Racing from your own save (F8 opens a debug lobby window) forces
-the voted weapon at its base aspect and keepsake at rank 3, and restores your loadout afterwards.
 
 ## Server
 
@@ -77,9 +51,23 @@ See [CLAUDE.md](CLAUDE.md) for layout and commands and [NOTES.md](NOTES.md) for
 what has been verified in the game. `scripts/suite.sh --game` runs everything,
 including two real game clients racing each other on the Linux test PC.
 
+## Future Plans
+
+H2CS is a beta project, released now to gauge interest. If people like this, I have lots of ideas for further improvements:
+
+- Host / Browse architecture where host sets rules
+- ELO system for persistent ranking / matchmaking
+- Server-side verification for detecting cheating
+- Spectate mode after you finish your run
+- Fear selection
+- Saved runs / racing against Ghosts
+- Chat messages for boon selections
+- Steam friend invites
+- Option to enable respawning on death
+
 ## How it was made, and license
 
-This mod was developed with AI (Claude, by Anthropic), and it is fully open
+This mod was developed with AI (Claude), and it is fully open
 source under the [MIT License](LICENSE). It is a fan project, not affiliated with
 Supergiant Games; Hades II and its assets belong to Supergiant. The installers
 download the mod loader and libraries from Thunderstore; nothing from the game is

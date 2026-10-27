@@ -63,3 +63,17 @@ a new version is out; the Race Board says when one is.
 Open source: [github.com/schmidtwmark/hades2-competitive-speedrunning](https://github.com/schmidtwmark/hades2-competitive-speedrunning),
 where you can also report problems. AI disclosure: this mod was developed with Claude
 (Anthropic). Hades II and its assets belong to Supergiant Games.
+
+## Future Plans
+
+H2CS is a beta project, released now to gauge interest. If people like this, I have lots of ideas for further improvements:
+
+- Host / Browse architecture where host sets rules
+- ELO system for persistent ranking / matchmaking
+- Server-side verification for detecting cheating
+- Spectate mode after you finish your run
+- Fear selection
+- Saved runs / racing against Ghosts
+- Chat messages for boon selections
+- Steam friend invites
+- Option to enable respawning on death
