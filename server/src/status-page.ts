@@ -3,7 +3,8 @@
 // the races under way and the latest ones over; GET /races lists every race
 // over. GET /status.json and /races.json are the same as data. Everything is
 // cached for a few seconds, so any number of viewers costs one snapshot per
-// interval.
+// interval. Times are rendered in UTC; /local-time.js, the page's one script,
+// rewrites them in the viewer's time zone.
 
 import { createHash } from "node:crypto";
 import http from "node:http";
@@ -64,7 +65,19 @@ a { color: var(--gold); }
   .top { flex-direction: column; gap: 0; } }
 `;
 const CSS_HASH = createHash("sha256").update(CSS).digest("base64");
-const PAGE_CSP = `default-src 'none'; style-src 'sha256-${CSS_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
+const PAGE_CSP = `default-src 'none'; style-src 'sha256-${CSS_HASH}'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
+
+/** Each <time> in the viewer's own time zone (the server only knows UTC). */
+export const LOCAL_TIME_JS = `"use strict";
+for (const el of document.querySelectorAll("time[datetime]")) {
+  const d = new Date(el.getAttribute("datetime"));
+  if (Number.isNaN(d.getTime())) continue;
+  el.title = el.textContent;
+  el.textContent = el.dataset.fmt === "clock"
+    ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" })
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+}
+`;
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -79,12 +92,16 @@ export function clock(seconds: number): string {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** "Nov 2, 02:05 UTC" (the page can't know the viewer's time zone). */
+/** "Nov 2, 02:05 UTC": what the page shows until /local-time.js runs. */
 export function when(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.toISOString().slice(11, 16)} UTC`;
 }
+
+/** A time /local-time.js shows in the viewer's zone: a date ("Nov 2, 6:05 PM PST") or a clock. */
+const timeTag = (iso: string, text: string, fmt: "date" | "clock" = "date") =>
+  `<time datetime="${esc(iso)}"${fmt === "clock" ? ` data-fmt="clock"` : ""}>${esc(text)}</time>`;
 
 const ENDED: Record<Outcome, string> = {
   cleared: "Cleared",
@@ -143,13 +160,13 @@ function pastItem(r: PublicPastRace): string {
   const unfinished = r.results.every((x) => x.place === null);
   const results = r.results.map((x) => (unfinished ? row(x, null) : row(x, String(x.place), { win: x.victory, fear: x.fear })));
   return (
-    `<li class="race"><div class="top"><span class="what">${esc(title(r) || "Race")}</span><span class="when">${esc(when(r.started_at))}</span></div>` +
+    `<li class="race"><div class="top"><span class="what">${esc(title(r) || "Race")}</span><span class="when">${timeTag(r.started_at, when(r.started_at))}</span></div>` +
     `<ol class="who">${results.join("")}</ol>${unfinished ? `<span class="how">No result on record</span>` : ""}</li>`
   );
 }
 
 function page(body: string, refresh: boolean, latestMod: string, at: number): string {
-  const updated = new Date(at).toISOString().slice(11, 19);
+  const iso = new Date(at).toISOString();
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -158,12 +175,13 @@ function page(body: string, refresh: boolean, latestMod: string, at: number): st
 ${refresh ? `<meta http-equiv="refresh" content="${REFRESH_SECONDS}">\n` : ""}<title>H2CS Live</title>
 <meta name="description" content="Who is racing on the Hades 2 Competitive Speedrunning server, and every race so far.">
 <style>${CSS}</style>
+<script src="/local-time.js" defer></script>
 </head>
 <body>
 <main>
 <h1>Hades 2 Competitive Speedrunning</h1>
 ${body}
-<footer>Updated ${updated} UTC${refresh ? `, refreshes every ${REFRESH_SECONDS} s` : ""} ·
+<footer>Updated ${timeTag(iso, `${iso.slice(11, 19)} UTC`, "clock")}${refresh ? `, refreshes every ${REFRESH_SECONDS} s` : ""} ·
 <a href="${MOD_URL}">Get the mod</a> (${esc(latestMod)}) · <a href="${REPO_URL}">GitHub</a> · <a href="/status.json">JSON</a></footer>
 </main>
 </body>
@@ -261,6 +279,7 @@ export function listenStatus(
       res.end(req.method === "HEAD" ? undefined : body);
     };
     if (req.method !== "GET" && req.method !== "HEAD") return reply(405, "text/plain", "method not allowed\n", { Allow: "GET, HEAD" });
+    if (path === "/local-time.js") return reply(200, "text/javascript; charset=utf-8", LOCAL_TIME_JS, { "Cache-Control": "public, max-age=3600" });
     const v = Object.hasOwn(VIEWS, path) ? VIEWS[path] : undefined;
     if (!v) return reply(404, "text/plain", "not found\n");
     const html = v.type.startsWith("text/html");

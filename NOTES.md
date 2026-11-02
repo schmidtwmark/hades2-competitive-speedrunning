@@ -552,6 +552,10 @@ room), time and Fear (race.json keeps `fear` from 2026-11-02 on; older records h
 redeploy cut off (results null) shows "No result on record". The server's keepsake names are now the
 game's English ones (TraitText DisplayName), not placeholders. Checked locally over a copy of the 13 real
 records plus a mock race.
+Local times (2026-11-02): the page renders times in UTC inside `<time datetime>` tags, and `/local-time.js`
+(the one script; CSP `script-src 'self'`) rewrites them with the viewer's locale and time zone, the UTC text
+kept as the tooltip. Without scripts the page still reads in UTC. Checked in the browser pane (CST, no CSP
+errors).
 
 ## Deployment (owner's r2modman profile on the test PC)
 

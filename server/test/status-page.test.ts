@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import type http from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
+import vm from "node:vm";
 import { RaceLogStore, type LogFs } from "../src/race-log-store.js";
 import type { PublicPastRace } from "../src/race-server.js";
-import { clock, how, listenStatus, renderHistory, renderPage, when } from "../src/status-page.js";
+import { clock, how, listenStatus, LOCAL_TIME_JS, renderHistory, renderPage, when } from "../src/status-page.js";
 import { makeServer, pair, racing, TestClient } from "./helpers.js";
 
 /** An in-memory file system holding race records (path -> contents). */
@@ -181,7 +182,9 @@ describe("status page", () => {
     assert.equal(page.split("Nov 2, 02:05 UTC").length - 1, 10, "the latest ten races");
     assert.match(page, /<a href="\/races">All 12 races<\/a>/);
     assert.match(page, /&lt;b&gt;Zag&lt;\/b&gt;/, "names are text, not markup");
-    assert.match(page, /Updated 18:44:12 UTC/);
+    assert.match(page, /Updated <time datetime="2026-10-27T18:44:12.000Z" data-fmt="clock">18:44:12 UTC<\/time>/);
+    assert.match(page, /<time datetime="2026-11-02T02:05:59.067Z">Nov 2, 02:05 UTC<\/time>/);
+    assert.match(page, /<script src="\/local-time.js" defer><\/script>/);
     assert.match(page, /http-equiv="refresh"/);
     const empty = renderPage({ online: 0, searching: 0, racing: 0, races: [] }, [], "0.6.7", 0);
     assert.match(empty, /No races right now/);
@@ -200,6 +203,28 @@ describe("status page", () => {
   });
 });
 
+describe("local times", () => {
+  it("rewrites each time in the viewer's zone, keeping the UTC text as its tooltip", () => {
+    const el = (iso: string, fmt?: string) => ({
+      textContent: "UTC text",
+      title: "",
+      dataset: fmt ? { fmt } : {},
+      getAttribute: () => iso,
+    });
+    const date = el("2026-11-02T02:05:59.067Z");
+    const time = el("2026-10-27T18:44:12.000Z", "clock");
+    const bad = el("not a date");
+    vm.runInNewContext(LOCAL_TIME_JS, { document: { querySelectorAll: () => [date, time, bad] } });
+    assert.equal(
+      date.textContent,
+      new Date("2026-11-02T02:05:59.067Z").toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }),
+    );
+    assert.match(time.textContent, /\d:44:12/);
+    assert.equal(date.title, "UTC text");
+    assert.equal(bad.textContent, "UTC text", "a bad date stays as it was");
+  });
+});
+
 describe("status page over HTTP", () => {
   async function serve() {
     const env = makeServer();
@@ -215,7 +240,10 @@ describe("status page over HTTP", () => {
       const page = await fetch(`${base}/`);
       assert.equal(page.status, 200);
       assert.match(page.headers.get("content-type") ?? "", /^text\/html/);
-      assert.match(page.headers.get("content-security-policy") ?? "", /default-src 'none'; style-src 'sha256-/);
+      assert.match(page.headers.get("content-security-policy") ?? "", /default-src 'none'; style-src 'sha256-[^;]+; script-src 'self';/);
+      const js = await fetch(`${base}/local-time.js`);
+      assert.match(js.headers.get("content-type") ?? "", /^text\/javascript/);
+      assert.equal(await js.text(), LOCAL_TIME_JS);
       assert.match(await page.text(), /No races right now/);
       const history = await fetch(`${base}/races`);
       assert.equal(history.status, 200);
