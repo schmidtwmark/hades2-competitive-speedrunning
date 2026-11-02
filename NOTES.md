@@ -541,10 +541,17 @@ Public status page (2026-10-27): with `STATUS_PORT` set (Railway: 8080) the serv
 on a Railway web domain that `scripts/railway-deploy.sh` creates (`serviceDomainCreate`, targetPort 8080;
 it prints `STATUS_URL`). `GET /` is a page rendered on the server that reloads every 15 s (no scripts; its
 CSP allows only its own style block, by hash) and `GET /status.json` the same snapshot: the presence counts
-and each lobby past its waiting room (route, weapon, racers, clock, furthest region). No racer names and no
+and each lobby past its waiting room (route, weapon, keepsake, clock, each racer's region and depth). No
 lobby codes, since a private race's code lets anyone join it. One snapshot is served for 10 s, so viewers
 don't add work per request. Checked locally with three mock racers (page at desktop and phone width), then
 live at https://race-server-production-2da9.up.railway.app/ (one hello over the TCP proxy showed as 1 online).
+Race history (2026-11-02, the owner chose to show racer names): the race records (`RACE_LOG_DIR`) are read
+at startup and each race is added as it ends; `/` shows the latest 10, `/races` (no auto-reload) and
+`/races.json` all of them, with each racer's place, how their run ended (region and depth from the result's
+room), time and Fear (race.json keeps `fear` from 2026-11-02 on; older records have none). A record a
+redeploy cut off (results null) shows "No result on record". The server's keepsake names are now the
+game's English ones (TraitText DisplayName), not placeholders. Checked locally over a copy of the 13 real
+records plus a mock race.
 
 ## Deployment (owner's r2modman profile on the test PC)
 

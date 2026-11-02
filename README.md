@@ -47,8 +47,9 @@ Plain TCP, newline-delimited JSON; message types are in `server/src/protocol.ts`
 
 With `STATUS_PORT` set (Railway: 8080, on the service's web domain), the server
 also serves a public status page there ([live](https://race-server-production-2da9.up.railway.app/)): how many are online, looking for a
-match and racing, and each race under way, without racer names or lobby codes.
-`/status.json` has the same as data.
+match and racing, each race under way with its racers, the latest races over,
+and every race on record at `/races`. Racer names are shown; lobby codes never
+are. `/status.json` and `/races.json` have the same as data.
 
 ## Development
 

@@ -962,6 +962,16 @@ describe("race logs", () => {
         mkdir: () => {},
         append: (p: string, t: string) => void files.set(p, (files.get(p) ?? "") + t),
         write: (p: string, t: string) => void files.set(p, t),
+        list: (dir: string) => {
+          const names = [...files.keys()].filter((k) => k.startsWith(`${dir}/`)).map((k) => k.slice(dir.length + 1).split("/")[0]!);
+          if (names.length === 0) throw new Error(`no ${dir}`);
+          return [...new Set(names)];
+        },
+        read: (p: string) => {
+          const t = files.get(p);
+          if (t === undefined) throw new Error(`no ${p}`);
+          return t;
+        },
       },
       lines: (suffix: string) => {
         const k = [...files.keys()].find((x) => x.endsWith(suffix))!;

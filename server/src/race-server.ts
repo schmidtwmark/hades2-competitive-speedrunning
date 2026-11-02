@@ -108,21 +108,28 @@ interface RunResult {
   splits?: Split[];
 }
 
+/** A racer as the public status page shows them. */
+export interface PublicRacer {
+  name: string;
+  bot: boolean;
+  /** Racing: where they last reported from. A finished race: where their run ended. */
+  region: string | null;
+  depth: number | null;
+  /** Once done: how their run ended, and its official time (seconds). */
+  outcome: Outcome | null;
+  time: number | null;
+}
+
 /** One lobby past its waiting room, as the public status page shows it. */
 export interface PublicRace {
   state: "voting" | "getting_ready" | "racing";
   /** Display names of what was voted; null until decided. */
   route: string | null;
   weapon: string | null;
-  /** Racers who aren't house bots. */
-  racers: number;
-  bot: boolean;
+  keepsake: string | null;
   /** Seconds since the start (racing only). */
   elapsed: number | null;
-  /** Racers done: cleared, fallen or forfeited. */
-  done: number;
-  /** The deepest racer's region and depth (racing, once someone reported a room). */
-  furthest: { region: string | null; depth: number } | null;
+  racers: PublicRacer[];
 }
 
 export interface PublicStatus {
@@ -131,6 +138,19 @@ export interface PublicStatus {
   racing: number;
   races: PublicRace[];
 }
+
+/** A race that is over, from its record. */
+export interface PublicPastRace {
+  started_at: string;
+  route: string | null;
+  weapon: string | null;
+  keepsake: string | null;
+  /** In finishing order; no place when the record has no results. */
+  results: (PublicRacer & { place: number | null; victory: boolean; fear: number | null })[];
+}
+
+/** The region of a room name ("I_Boss01": Tartarus). */
+const regionOfRoom = (room: string | null | undefined) => (room ? (REGIONS[room.split("_")[0]!] ?? null) : null);
 
 interface RaceState extends RaceSetup {
   startAt: number | null;
@@ -452,42 +472,84 @@ export class RaceServer {
     return { online, searching, racing };
   }
 
+  private optionName(phase: VotePhase, id: string | null | undefined): string | null {
+    return id ? (this.opts.pools[phase]?.find((o) => o.id === id)?.name ?? null) : null;
+  }
+
   /**
    * For the public status page: the presence counts and every lobby past its
-   * waiting room. No racer names and no lobby codes (a private race's code lets
-   * anyone join it).
+   * waiting room, with the racers' names. No lobby codes: a private race's code
+   * lets anyone join it.
    */
   publicStatus(): PublicStatus {
     const races: PublicRace[] = [];
-    const name = (phase: VotePhase, id: string | null | undefined) =>
-      id ? (this.opts.pools[phase]?.find((o) => o.id === id)?.name ?? null) : null;
     for (const lobby of this.lobbies.values()) {
       if (lobby.phase === "waiting" || lobby.phase === "finished") continue;
       const race = lobby.race;
       const startAt = race?.startAt ?? null;
       const racing = lobby.phase === "racing" && race !== null && startAt !== null;
-      const ids = racing ? race.entrants.map((e) => e.id) : lobby.players.map((p) => p.id);
-      const bots = ids.filter((id) => this.sessions.get(id)?.bot).length;
-      let furthest: PublicRace["furthest"] = null;
-      if (racing) {
-        for (const p of race.progress.values()) {
-          if (!furthest || p.depth > furthest.depth) furthest = { region: (p.biome && REGIONS[p.biome]) || null, depth: p.depth };
-        }
-      }
+      const people = racing ? race.entrants : lobby.players;
+      const racers = people.map((p): PublicRacer => {
+        const progress = racing ? race.progress.get(p.id) : undefined;
+        const result = racing ? race.results.get(p.id) : undefined;
+        return {
+          name: p.name,
+          bot: !!this.sessions.get(p.id)?.bot,
+          region: (progress?.biome && REGIONS[progress.biome]) || null,
+          depth: progress?.depth ?? null,
+          outcome: result?.outcome ?? null,
+          time: result?.time ?? null,
+        };
+      });
       races.push({
         state: racing ? "racing" : votePhaseOf(lobby.phase) ? "voting" : "getting_ready",
-        route: name("route", lobby.selected.route),
-        weapon: name("weapon", lobby.selected.weapon),
-        racers: ids.length - bots,
-        bot: bots > 0,
+        route: this.optionName("route", lobby.selected.route),
+        weapon: this.optionName("weapon", lobby.selected.weapon),
+        keepsake: this.optionName("keepsake", lobby.selected.keepsake),
         elapsed: racing ? Math.floor((this.opts.scheduler.now() - startAt) / 1000) : null,
-        done: racing ? race.results.size : 0,
-        furthest,
+        racers,
       });
     }
     // Races first, longest-running first; then lobbies still voting or getting ready.
     races.sort((a, b) => (b.elapsed ?? -1) - (a.elapsed ?? -1));
     return { ...this.presence(), races };
+  }
+
+  /** Every race over, newest first, with the racers' names (none without race records). */
+  publicHistory(): PublicPastRace[] {
+    return (this.opts.raceLogs?.history() ?? []).map((r) => {
+      const bots = new Set(r.entrants.filter((e) => e.bot).map((e) => e.id));
+      const results = r.results
+        ? r.results.map((x) => ({
+            name: x.name,
+            bot: bots.has(x.id),
+            region: regionOfRoom(x.room),
+            depth: x.depth,
+            outcome: x.outcome,
+            time: x.time,
+            place: x.place,
+            victory: x.victory,
+            fear: x.fear ?? null,
+          }))
+        : r.entrants.map((e) => ({
+            name: e.name,
+            bot: e.bot,
+            region: null,
+            depth: null,
+            outcome: null,
+            time: null,
+            place: null,
+            victory: false,
+            fear: null,
+          }));
+      return {
+        started_at: r.started_at,
+        route: this.optionName("route", r.route),
+        weapon: this.optionName("weapon", r.weapon),
+        keepsake: this.optionName("keepsake", r.keepsake),
+        results,
+      };
+    });
   }
 
   /** The counts may have changed: tell everyone, at most once a second and only on a change. */

@@ -5,9 +5,10 @@
 //   <stamp>-<lobby>-race<id>/<n>-<name>.jsonl  that racer's choice log
 // The .jsonl files have the clients' own format (mod/src/racelog.lua) behind a
 // start line written here, so scripts/compare-race-logs.py reads them as is.
-// scripts/race-report.sh fetches and compares them.
+// scripts/race-report.sh fetches and compares them. The summaries are also the
+// race history on the status page: read at startup, added to as races finish.
 
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RaceResultEntry, RaceSetup } from "./protocol.js";
 
@@ -15,12 +16,17 @@ export interface LogFs {
   mkdir(path: string): void;
   append(path: string, text: string): void;
   write(path: string, text: string): void;
+  /** The names in a directory (throws if it doesn't exist). */
+  list(path: string): string[];
+  read(path: string): string;
 }
 
 const nodeFs: LogFs = {
   mkdir: (p) => mkdirSync(p, { recursive: true }),
   append: (p, t) => appendFileSync(p, t),
   write: (p, t) => writeFileSync(p, t),
+  list: (p) => readdirSync(p),
+  read: (p) => readFileSync(p, "utf8"),
 };
 
 /** Lines kept per racer and race: a whole run logs a few hundred. */
@@ -32,9 +38,20 @@ interface Entrant {
   bot: boolean;
 }
 
+/** A racer's result as race.json keeps it: no build or stats, but their Fear. */
+export type SummaryResult = Omit<RaceResultEntry, "build" | "stats"> & { fear?: number };
+
+/** race.json: results stay null until the race is over (or if the server stopped first). */
+export interface RaceSummary extends RaceSetup {
+  lobby: string;
+  started_at: string;
+  entrants: Entrant[];
+  results: SummaryResult[] | null;
+}
+
 interface RaceRecord {
   folder: string;
-  summary: Record<string, unknown>;
+  summary: RaceSummary;
   files: Map<string, { path: string; lines: number }>;
 }
 
@@ -42,12 +59,39 @@ const safe = (s: string) => s.replace(/[^A-Za-z0-9-]/g, "_").slice(0, 32) || "ra
 
 export class RaceLogStore {
   private races = new Map<string, RaceRecord>();
+  /** Every race over, in no particular order. */
+  private past: RaceSummary[] = [];
 
   constructor(
     private readonly dir: string | null,
     private readonly log: (line: string) => void,
     private readonly fs: LogFs = nodeFs,
-  ) {}
+  ) {
+    if (dir) this.load(dir);
+  }
+
+  /** The races kept by earlier runs of the server. */
+  private load(dir: string): void {
+    let folders: string[];
+    try {
+      folders = this.fs.list(dir);
+    } catch {
+      return; // no races yet
+    }
+    for (const f of folders) {
+      try {
+        this.past.push(JSON.parse(this.fs.read(join(dir, f, "race.json"))) as RaceSummary);
+      } catch (err) {
+        this.log(`race log: can't read ${f}/race.json: ${(err as Error).message}`);
+      }
+    }
+    this.log(`race log: ${this.past.length} races on record`);
+  }
+
+  /** Every race over, newest first. */
+  history(): RaceSummary[] {
+    return [...this.past].sort((a, b) => (a.started_at < b.started_at ? 1 : a.started_at > b.started_at ? -1 : 0));
+  }
 
   private key(lobby: string, raceId: number): string {
     return `${lobby}/${raceId}`;
@@ -59,7 +103,7 @@ export class RaceLogStore {
     this.forget(lobby); // one race per lobby at a time
     const stamp = new Date(now).toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-");
     const folder = join(this.dir, `${stamp}-${lobby}-race${race.race_id}`);
-    const summary = { lobby, ...race, started_at: new Date(now).toISOString(), entrants, results: null };
+    const summary: RaceSummary = { lobby, ...race, started_at: new Date(now).toISOString(), entrants, results: null };
     const rec: RaceRecord = { folder, summary, files: new Map() };
     try {
       this.fs.mkdir(folder);
@@ -93,7 +137,8 @@ export class RaceLogStore {
   finish(lobby: string, raceId: number, results: RaceResultEntry[]): void {
     const rec = this.races.get(this.key(lobby, raceId));
     if (!rec) return;
-    rec.summary.results = results.map(({ build: _b, stats: _s, ...r }) => r);
+    rec.summary.results = results.map(({ build: _b, stats, ...r }) => (stats?.Fear ? { ...r, fear: stats.Fear } : r));
+    if (!this.past.includes(rec.summary)) this.past.push(rec.summary);
     try {
       this.fs.write(join(rec.folder, "race.json"), JSON.stringify(rec.summary, null, 2) + "\n");
       this.log(`race log: ${rec.folder}`);
